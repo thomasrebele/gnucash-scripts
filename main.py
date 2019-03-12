@@ -40,7 +40,7 @@ class CashScript:
         return child_account
 
     def find_account_by_isin(self, account, isin):
-        if account.GetCommodity().get_cusip() == isin:
+        if account.GetCommodity() and account.GetCommodity().get_cusip() == isin:
             return account
         for child in account.get_children():
             found = self.find_account_by_isin(child, isin)
@@ -76,24 +76,48 @@ class CashScript:
         print("  quote tz: " + str(commodity.get_quote_tz()))
 
 
-    def add_stock_commodity(self, isin):
+    def get_stock_commodity(self, isin):
         # lookup onvista, e.g.  https://www.onvista.de/LU1737652583
         # parse first part of URL
         # commodity mnemonic needs to be unique for namespace
 
-        pass
+        commod_tab = book.get_table()
+        # 'book', 'fullname', 'commodity_namespace', 'mnemonic', 'cusip', and 'fraction'
+        name = isin # TODO
+        new_commod = GncCommodity(book, isin, name, isin, isin, 1)
+        commod_tab.insert(new_commod)
+        # print(dir(commod_tab))
+
+        return new_commod
+
+
 
     def add_stock_transaction(self, account, commodity, price, count):
         pass
 
-    def get_stock_account(self, root, isin):
-        acc = self.find_account_by_isin(root, isin)
+
+
+    def get_stock_account(self, parent, isin):
+        acc = self.find_account_by_isin(parent, isin)
         if acc:
             return acc
-        # TODO: create account
-        # stock_type = "TODO"
-        # category = Account()
-        # print(dir(root))
+
+        # create account
+        stock_type = "TODO"
+        category = parent.lookup_by_name(stock_type)
+        if not category:
+            category = Account(self.book)
+            category.SetName(stock_type)
+            parent.append_child(category)
+
+        commodity = self.get_stock_commodity(isin)
+        stock_acc = Account(self.book)
+        stock_acc.SetName(isin)
+        print(dir(stock_acc))
+        stock_acc.SetCommodity(commodity)
+        category.append_child(stock_acc)
+
+
 
 
 
@@ -101,7 +125,9 @@ class CashScript:
         with open(csv_file, "r", encoding="iso-8859-1") as f:
             id_to_acc = {}
 
-            for line in f:
+            for i, line in enumerate(f):
+                if i==0: continue
+
                 row = line.rstrip("\n").split(";")
                 print()
                 print(row)
@@ -144,13 +170,6 @@ if __name__ == '__main__':
             assets_acc = cs.find_account(assets_path, root)
             trading_acc = cs.find_account(trading_path, root)
             cs.read_portfolio_transactions(args["<csv_file>"], assets_acc, trading_acc)
-
-        # commod_tab = book.get_table()
-
-        # # 'book', 'fullname', 'commodity_namespace', 'mnemonic', 'cusip', and 'fraction'
-        # new_commod = GncCommodity(book, "NAME3", "FundDEF", "XYZ123x", "DE0007123c", 1)
-        # commod_tab.insert(new_commod)
-        # print(dir(commod_tab))
 
         # print(dir(root))
         cs.print_accounts(root)
