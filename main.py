@@ -1,13 +1,13 @@
 """Gnucash Scripts
 
 Usage:
+  main.py [options] portfolio <csv_file> assets <assets_account> [trading <trading_account>]
   main.py [options]
 
 Options:
   -h --help                     Show this screen.
   --version                     Show version.
   --gnucash <gnucash>           Gnucash file.
-  --portfolio <portfolio>       Portfolio transactions.
 
 """
 
@@ -31,9 +31,23 @@ def find_account(account, path):
         return find_account(child_account, path[1:])
     return child_account
 
+def find_account_by_isin(account, isin):
+    if account.GetCommodity().get_cusip() == isin:
+        return account
+    for child in account.get_children():
+        found = find_account_by_isin(child, isin)
+        if found:
+            return found
+
+
+def print_account(account, prefix="   "):
+    if account:
+        print(account.get_full_name())
+    else:
+        print("NO ACCOUNT FOUND")
 
 def print_accounts(account, prefix="  "):
-    print(prefix + str(account.get_full_name()))
+    print_account(account, prefix)
     for child in account.get_children():
         print_accounts(child, prefix+"  ")
 
@@ -64,11 +78,20 @@ def add_stock_commodity(isin):
 def add_stock_transaction(account, commodity, price, count):
     pass
 
+def get_stock_account(root, isin):
+    acc = find_account_by_isin(root, isin)
+    if acc:
+        return acc
+    # TODO: create account
 
-def read_portfolio_transactions(csv_file):
+
+def read_portfolio_transactions(csv_file, assets_account, trading_account):
     with open(csv_file, "r", encoding="iso-8859-1") as f:
+        id_to_acc = {}
+
         for line in f:
             row = line.rstrip("\n").split(";")
+            print()
             print(row)
             acc_number = row[0]
             date = row[1]
@@ -80,7 +103,15 @@ def read_portfolio_transactions(csv_file):
             price = row[9]
             depot = row[10]
 
-            print(nominal)
+            print(isin)
+
+            trading_acc = get_stock_account(trading_account, isin)
+            assets_acc = get_stock_account(assets_account, isin)
+
+            print_account(trading_acc)
+            print_account(assets_acc)
+
+
 
 
 
@@ -93,18 +124,19 @@ if __name__ == '__main__':
         book = session.book
         root = book.get_root_account()
 
+        if args["portfolio"]:
+            assets_path = args["<assets_account>"] or "Assets"
+            trading_path = args["<trading_account>"] or "Trading"
+            assets_acc = find_account(root, assets_path)
+            trading_acc = find_account(root, trading_path)
+            read_portfolio_transactions(args["<csv_file>"], assets_acc, trading_acc)
 
         commod_tab = book.get_table()
 
         # 'book', 'fullname', 'commodity_namespace', 'mnemonic', 'cusip', and 'fraction'
-        new_commod = GncCommodity(book, "NAME1", "FundXYZ", "XYZ123x", "DE0007123a", 1)
-        commod_tab.insert(new_commod)
-        new_commod = GncCommodity(book, "NAME2", "FundABC", "XYZ123x", "DE0007123b", 1)
-        commod_tab.insert(new_commod)
         new_commod = GncCommodity(book, "NAME3", "FundDEF", "XYZ123x", "DE0007123c", 1)
         commod_tab.insert(new_commod)
         print(dir(commod_tab))
-
 
         # print(dir(root))
         # print_accounts(root)
