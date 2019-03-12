@@ -1,7 +1,7 @@
 """Gnucash Scripts
 
 Usage:
-  main.py [options] portfolio <csv_file> assets <assets_account> [trading <trading_account>]
+  main.py [options] portfolio <csv_file> [assets <assets_account>] [trading <trading_account>]
   main.py [options]
 
 Options:
@@ -27,6 +27,7 @@ class CashScript:
         self.session = session
         self.book = session.book
         self.root = self.book.get_root_account()
+        self.commod_tab = self.book.get_table()
 
 
     def find_account(self, path, account):
@@ -46,6 +47,16 @@ class CashScript:
             found = self.find_account_by_isin(child, isin)
             if found:
                 return found
+
+    def find_account_by_number(self, account, number):
+        print(account.get_full_name() + "  " + account.GetDescription())
+        if number in account.GetDescription():
+            return account
+        for child in account.get_children():
+            found = self.find_account_by_number(child, number)
+            if found:
+                return found
+
 
 
     def print_account(self, account, prefix="   "):
@@ -81,16 +92,10 @@ class CashScript:
         # parse first part of URL
         # commodity mnemonic needs to be unique for namespace
 
-        commod_tab = book.get_table()
         # 'book', 'fullname', 'commodity_namespace', 'mnemonic', 'cusip', and 'fraction'
         name = isin # TODO
         new_commod = GncCommodity(book, isin, name, isin, isin, 1)
-        commod_tab.insert(new_commod)
-        # print(dir(commod_tab))
-
-        return new_commod
-
-
+        return self.commod_tab.insert(new_commod)
 
     def add_stock_transaction(self, account, commodity, price, count):
         pass
@@ -108,16 +113,17 @@ class CashScript:
         if not category:
             category = Account(self.book)
             category.SetName(stock_type)
+            currency = self.commod_tab.lookup('ISO4217', 'EUR')
+            category.SetCommodity(currency)
             parent.append_child(category)
 
+        # TODO account type
         commodity = self.get_stock_commodity(isin)
         stock_acc = Account(self.book)
         stock_acc.SetName(isin)
-        print(dir(stock_acc))
         stock_acc.SetCommodity(commodity)
         category.append_child(stock_acc)
-
-
+        return stock_acc
 
 
 
@@ -141,11 +147,11 @@ class CashScript:
                 price = row[9]
                 depot = row[10]
 
-                print(isin)
-
+                giro_acc = self.find_account_by_number(assets_account, acc_number)
                 trading_acc = self.get_stock_account(trading_account, isin)
                 assets_acc = self.get_stock_account(assets_account, isin)
 
+                self.print_account(giro_acc)
                 self.print_account(trading_acc)
                 self.print_account(assets_acc)
 
@@ -168,11 +174,12 @@ if __name__ == '__main__':
             assets_path = args["<assets_account>"] or "Assets"
             trading_path = args["<trading_account>"] or "Trading"
             assets_acc = cs.find_account(assets_path, root)
+            cs.print_account(assets_acc)
             trading_acc = cs.find_account(trading_path, root)
             cs.read_portfolio_transactions(args["<csv_file>"], assets_acc, trading_acc)
 
         # print(dir(root))
-        cs.print_accounts(root)
+        # cs.print_accounts(root)
 
         session.save()
     finally:
