@@ -163,13 +163,13 @@ class CashScript:
 
     def goc_EUR_split(self, transaction, account, cents):
         value = GncNumeric(cents, self.currency_EUR.get_fraction())
-        return self.goc_split(transaction, account, value, value)
+        amount = GncNumeric(cents, self.currency_EUR.get_fraction())
+        return self.goc_split(transaction, account, value, amount)
 
     def read_portfolio_transactions(self, csv_file, assets_account, trading_account):
         with open(csv_file, "r", encoding="iso-8859-1") as f:
             id_to_acc = {}
 
-            currency_acc = self.find_account("CURRENCY.EUR", trading_account)
 
             for i, line in enumerate(f):
                 if i==0: continue
@@ -198,6 +198,8 @@ class CashScript:
                 giro_acc = self.find_account_by_number(assets_account, acc_number)
                 trading_acc = self.goc_stock_account(trading_account, isin)
                 assets_acc = self.goc_stock_account(assets_account, isin)
+                currency_acc = self.find_account("CURRENCY.EUR", trading_account)
+                fee_acc = self.find_account("Expenses.Services.Broker", self.root)
 
                 # find transaction
                 tx = giro_acc.FindTransByDesc(transaction_info)
@@ -206,14 +208,16 @@ class CashScript:
                     print("ERROR: transaction not found for " + line)
                     continue
 
+                print("BEFORE --------------------------------------------------------------------------------")
+                self.print_transaction(tx)
+
                 # find split with the spent money
                 sp_giro = self.find_split_by_account(tx, giro_acc)
 
                 if not sp_giro:
                     raise "ERROR: split not found"
 
-                total = sp_giro.GetValue()
-                print(dir(total))
+                total_cents = sp_giro.GetValue().num()
 
                 tx.BeginEdit()
                 # transfer stocks from virtual account to assets account
@@ -223,10 +227,15 @@ class CashScript:
                 self.goc_EUR_split(tx, currency_acc, total_stock_cents)
 
                 # broker_expenses
-                self.goc_EUR_split(tx, giro_acc, -123)
+                expenses_cents = abs(total_cents) - abs(total_stock_cents)
+                print("total " + str(total_cents)
+                        + " stock " + str(total_stock_cents)
+                        + " exp " + str(expenses_cents))
+                self.goc_EUR_split(tx, fee_acc, expenses_cents)
 
                 tx.CommitEdit()
 
+                print("AFTER --------------------------------------------------------------------------------")
                 self.print_transaction(tx)
 
 
