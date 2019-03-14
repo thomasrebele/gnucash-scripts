@@ -49,7 +49,6 @@ class CashScript:
                 return found
 
     def find_account_by_number(self, account, number):
-        print(account.get_full_name() + "  " + account.GetDescription())
         if number in account.GetDescription():
             return account
         for child in account.get_children():
@@ -61,9 +60,23 @@ class CashScript:
 
     def print_account(self, account, prefix="   "):
         if account:
-            print(account.get_full_name())
+            print(prefix + account.get_full_name())
         else:
-            print("NO ACCOUNT FOUND")
+            print(prefix + "NO ACCOUNT FOUND")
+
+    def print_split(self, split):
+        self.print_account(split.GetAccount(), prefix="split for ")
+        print("  memo: " + split.GetMemo())
+        print("  value: " + str(split.GetValue()))
+        print("  amount: " + str(split.GetAmount()))
+
+    def print_transaction(self, transaction):
+        if not transaction:
+            print("NO TRANSACTION")
+            return
+        for split in transaction.GetSplitList():
+            self.print_split(split)
+        pass
 
     def print_accounts(self, account, prefix="  "):
         self.print_account(account, prefix)
@@ -72,7 +85,6 @@ class CashScript:
 
     def print_account_info(self, account):
         commodity = account.GetCommodity()
-        print(dir(commodity))
 
         print("commodity:")
         print("  full name: " + str(commodity.get_fullname()))
@@ -86,8 +98,13 @@ class CashScript:
         print("  quote source: " + str(commodity.get_quote_source()))
         print("  quote tz: " + str(commodity.get_quote_tz()))
 
+    def print_transactions(self, account):
+        # TODO: use description to find transaction
+        pass
+        #for split in account.GetSplitList():
+        #    self.print_split(split)
 
-    def get_stock_commodity(self, isin):
+    def goc_stock_commodity(self, isin):
         # lookup onvista, e.g.  https://www.onvista.de/LU1737652583
         # parse first part of URL
         # commodity mnemonic needs to be unique for namespace
@@ -97,12 +114,8 @@ class CashScript:
         new_commod = GncCommodity(book, isin, name, isin, isin, 1)
         return self.commod_tab.insert(new_commod)
 
-    def add_stock_transaction(self, account, commodity, price, count):
-        pass
 
-
-
-    def get_stock_account(self, parent, isin):
+    def goc_stock_account(self, parent, isin):
         acc = self.find_account_by_isin(parent, isin)
         if acc:
             return acc
@@ -118,18 +131,22 @@ class CashScript:
             parent.append_child(category)
 
         # TODO account type
-        commodity = self.get_stock_commodity(isin)
+        commodity = self.goc_stock_commodity(isin)
         stock_acc = Account(self.book)
         stock_acc.SetName(isin)
         stock_acc.SetCommodity(commodity)
         category.append_child(stock_acc)
         return stock_acc
 
+    #def goc_split(trans
 
 
     def read_portfolio_transactions(self, csv_file, assets_account, trading_account):
         with open(csv_file, "r", encoding="iso-8859-1") as f:
             id_to_acc = {}
+
+            currency_acc = self.find_account("CURRENCY.EUR", trading_account)
+            currency = currency_acc.GetCommodity()
 
             for i, line in enumerate(f):
                 if i==0: continue
@@ -147,13 +164,24 @@ class CashScript:
                 price = row[9]
                 depot = row[10]
 
+                # find accounts
                 giro_acc = self.find_account_by_number(assets_account, acc_number)
-                trading_acc = self.get_stock_account(trading_account, isin)
-                assets_acc = self.get_stock_account(assets_account, isin)
+                trading_acc = self.goc_stock_account(trading_account, isin)
+                assets_acc = self.goc_stock_account(assets_account, isin)
 
-                self.print_account(giro_acc)
-                self.print_account(trading_acc)
-                self.print_account(assets_acc)
+                # find transaction
+                trans = giro_acc.FindTransByDesc(transaction_info)
+                self.print_transaction(trans)
+
+                if not trans:
+                    print("ERROR: transaction not found for " + line)
+                    continue
+
+                print(dir(trans))
+                total = "TODO: LOOKUP SPLIT FOR giro_acc"
+                amount = GncNumeric(100 * -1, currency.get_fraction())
+                value = GncNumeric(100 * -1, currency.get_fraction())
+                #self.goc_split(trans, currency_acc, value, amount)
 
 
 
