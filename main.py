@@ -18,6 +18,7 @@ Options:
 
 from docopt import docopt
 
+from decimal import Decimal
 import gnucash as gc
 from gnucash import Account, Session, Transaction, Split, GncNumeric, GncCommodity
 
@@ -29,6 +30,7 @@ class CashScript:
         self.root = self.book.get_root_account()
         self.commod_tab = self.book.get_table()
 
+        self.currency_EUR = self.commod_tab.lookup('ISO4217', 'EUR')
 
     def find_account(self, path, account):
         if type(path) == str:
@@ -56,6 +58,10 @@ class CashScript:
             if found:
                 return found
 
+    def find_split_by_account(self, transaction, account):
+        for split in transaction.GetSplitList():
+            if split.GetAccount().get_full_name() == account.get_full_name():
+                return split
 
 
     def print_account(self, account, prefix="   "):
@@ -66,9 +72,10 @@ class CashScript:
 
     def print_split(self, split):
         self.print_account(split.GetAccount(), prefix="split for ")
-        print("  memo: " + split.GetMemo())
-        print("  value: " + str(split.GetValue()))
-        print("  amount: " + str(split.GetAmount()))
+        print("  value: " + str(split.GetValue())
+            + "  amount: " + str(split.GetAmount())
+            + "  memo: " + split.GetMemo())
+        print()
 
     def print_transaction(self, transaction):
         if not transaction:
@@ -126,8 +133,7 @@ class CashScript:
         if not category:
             category = Account(self.book)
             category.SetName(stock_type)
-            currency = self.commod_tab.lookup('ISO4217', 'EUR')
-            category.SetCommodity(currency)
+            category.SetCommodity(self.currency_EUR)
             parent.append_child(category)
 
         # TODO account type
@@ -138,15 +144,32 @@ class CashScript:
         category.append_child(stock_acc)
         return stock_acc
 
-    #def goc_split(trans
+    #def goc_split(tx
 
+    def goc_split(self, transaction, account, value, amount):
+        split = Split(self.book)
+        split.SetParent(transaction)
+        split.SetAccount(account)
+        split.SetValue(value)
+        split.SetAmount(amount)
+        split.SetMemo("automatic")
+        return split
+
+    def goc_stock_split(self, transaction, account, stock_count, value_cents):
+        value = GncNumeric(value_cents, self.currency_EUR.get_fraction())
+        amount = GncNumeric(stock_count, 1)
+        return self.goc_split(transaction, account, value, amount)
+
+
+    def goc_EUR_split(self, transaction, account, cents):
+        value = GncNumeric(cents, self.currency_EUR.get_fraction())
+        return self.goc_split(transaction, account, value, value)
 
     def read_portfolio_transactions(self, csv_file, assets_account, trading_account):
         with open(csv_file, "r", encoding="iso-8859-1") as f:
             id_to_acc = {}
 
             currency_acc = self.find_account("CURRENCY.EUR", trading_account)
-            currency = currency_acc.GetCommodity()
 
             for i, line in enumerate(f):
                 if i==0: continue
@@ -164,26 +187,47 @@ class CashScript:
                 price = row[9]
                 depot = row[10]
 
+                stock_count = int(nominal.replace(",000",""))
+                stock_price = Decimal(price.replace(",","."))
+                total_stock_cents = int(stock_price * stock_count * 100)
+
+                if not nominal.endswith(",000"):
+                    raise "ERROR: only integer amount of stocks allowed"
+
                 # find accounts
                 giro_acc = self.find_account_by_number(assets_account, acc_number)
                 trading_acc = self.goc_stock_account(trading_account, isin)
                 assets_acc = self.goc_stock_account(assets_account, isin)
 
                 # find transaction
-                trans = giro_acc.FindTransByDesc(transaction_info)
-                self.print_transaction(trans)
+                tx = giro_acc.FindTransByDesc(transaction_info)
 
-                if not trans:
+                if not tx:
                     print("ERROR: transaction not found for " + line)
                     continue
 
-                print(dir(trans))
-                total = "TODO: LOOKUP SPLIT FOR giro_acc"
-                amount = GncNumeric(100 * -1, currency.get_fraction())
-                value = GncNumeric(100 * -1, currency.get_fraction())
-                #self.goc_split(trans, currency_acc, value, amount)
+                # find split with the spent money
+                sp_giro = self.find_split_by_account(tx, giro_acc)
 
+                if not sp_giro:
+                    raise "ERROR: split not found"
 
+                total = sp_giro.GetValue()
+                print(dir(total))
+
+                tx.BeginEdit()
+                # transfer stocks from virtual account to assets account
+                self.goc_stock_split(tx, assets_acc, stock_count, total_stock_cents)
+                self.goc_stock_split(tx, trading_acc, -stock_count, -total_stock_cents)
+                # transfer virtual money to counterbalance the valueof the stocks
+                self.goc_EUR_split(tx, currency_acc, total_stock_cents)
+
+                # broker_expenses
+                self.goc_EUR_split(tx, giro_acc, -123)
+
+                tx.CommitEdit()
+
+                self.print_transaction(tx)
 
 
 
