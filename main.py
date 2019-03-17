@@ -33,22 +33,12 @@ class CashScript:
         self.commod_tab = self.book.get_table()
         self.price_db = self.book.get_price_db()
 
-        commodity = self.goc_stock_commodity("DE000A0JBPG2")
         self.currency_EUR = self.commod_tab.lookup('ISO4217', 'EUR')
 
-        # TODO: move to right place
-        price = GncPrice(self.book)
-        print(dir(price))
-        price.set_commodity(commodity)
-        price.set_currency(self.currency_EUR)
-        millis = datetime.datetime(2199,4,1)
-        price.set_time64(millis)
-        price.set_value(GncNumeric(123,100))
-        price.set_source_string("TODO")
-        self.price_db.add_price(price)
 
-
-    def find_account(self, path, account):
+    def find_account(self, path, account=None):
+        if not account:
+            account = self.root
         if type(path) == str:
             path = path.split(".")
         child_account = account.lookup_by_name(path[0])
@@ -82,15 +72,24 @@ class CashScript:
 
     def print_account(self, account, prefix="   "):
         if account:
-            print(prefix + account.get_full_name())
+            print(prefix + account.get_full_name() + " (" + account.GetCommodity().get_fullname() + ")")
         else:
             print(prefix + "NO ACCOUNT FOUND")
 
     def print_split(self, split):
-        self.print_account(split.GetAccount(), prefix="split for ")
+        account = split.GetAccount()
+        self.print_account(account, prefix="split for ")
         print("  value: " + str(split.GetValue())
             + "  amount: " + str(split.GetAmount())
-            + "  memo: " + split.GetMemo())
+            + "  memo: " + split.GetMemo()
+            + "  action: " + split.GetAction()
+            + "  share price: " + str(split.GetSharePrice())
+            + "  lot: " + str(split.GetLot())
+            + "  reconcile: " + str(split.GetReconcile())
+            + "  base value: " + str(split.GetBaseValue(account.GetCommodity()))
+            #+ "  balance: " + str(split.GetBalance())
+            )
+
         print()
 
     def print_transaction(self, transaction):
@@ -162,25 +161,40 @@ class CashScript:
 
     #def goc_split(tx
 
-    def goc_split(self, transaction, account, value, amount):
+    def goc_split(self, transaction, account, value=None, amount=None):
         split = Split(self.book)
         split.SetParent(transaction)
         split.SetAccount(account)
-        split.SetValue(value)
-        split.SetAmount(amount)
         split.SetMemo("automatic")
+        if value:
+            split.SetValue(value)
+        if amount:
+            split.SetAmount(amount)
         return split
 
     def goc_stock_split(self, transaction, account, stock_count, value_cents):
-        value = GncNumeric(value_cents, self.currency_EUR.get_fraction())
+        split = self.goc_split(transaction, account)
         amount = GncNumeric(stock_count, 1)
-        return self.goc_split(transaction, account, value, amount)
+        price = GncNumeric(int(value_cents), self.currency_EUR.get_fraction())
+        split.SetSharePriceAndAmount(price, amount)
+        return split
 
 
     def goc_EUR_split(self, transaction, account, cents):
         value = GncNumeric(cents, self.currency_EUR.get_fraction())
         amount = GncNumeric(cents, self.currency_EUR.get_fraction())
         return self.goc_split(transaction, account, value, amount)
+
+    def goc_stock_price(self, commodity, cents, datetime_date):
+        # TODO: move to right place
+        price = GncPrice(self.book)
+        print(dir(price))
+        price.set_commodity(commodity)
+        price.set_currency(self.currency_EUR)
+        price.set_time64(datetime_date)
+        price.set_value(GncNumeric(cents,100))
+        price.set_source_string("TODO")
+        self.price_db.add_price(price)
 
     def read_portfolio_transactions(self, csv_file, assets_account, trading_account):
         with open(csv_file, "r", encoding="iso-8859-1") as f:
@@ -205,7 +219,8 @@ class CashScript:
 
                 stock_count = int(nominal.replace(",000",""))
                 stock_price = Decimal(price.replace(",","."))
-                total_stock_cents = int(stock_price * stock_count * 100)
+                stock_cents = int(stock_price * 100)
+                total_stock_cents = int(stock_count * stock_price * 100)
 
                 if not nominal.endswith(",000"):
                     raise "ERROR: only integer amount of stocks allowed"
@@ -216,6 +231,7 @@ class CashScript:
                 assets_acc = self.goc_stock_account(assets_account, isin)
                 currency_acc = self.find_account("CURRENCY.EUR", trading_account)
                 fee_acc = self.find_account("Expenses.Services.Broker", self.root)
+                stock_commodity = trading_acc.GetCommodity()
 
                 # find transaction
                 tx = giro_acc.FindTransByDesc(transaction_info)
@@ -224,7 +240,16 @@ class CashScript:
                     print("ERROR: transaction not found for " + line)
                     continue
 
+                # parse date
+                year = int(date[4:8])
+                month = int(date[2:4])
+                day = int(date[0:2])
+                print("day " + str(day) + " month " + str(month) + " year " + str(year))
+                datetime_date = datetime.datetime(year,month,day)
+                self.goc_stock_price(stock_commodity, stock_cents, datetime_date)
+
                 print("BEFORE --------------------------------------------------------------------------------")
+
                 self.print_transaction(tx)
 
                 # find split with the spent money
@@ -236,26 +261,52 @@ class CashScript:
                 total_cents = sp_giro.GetValue().num()
 
                 tx.BeginEdit()
-                # transfer stocks from virtual account to assets account
-                self.goc_stock_split(tx, assets_acc, stock_count, total_stock_cents)
-                self.goc_stock_split(tx, trading_acc, -stock_count, -total_stock_cents)
-                # transfer virtual money to counterbalance the valueof the stocks
-                #self.goc_EUR_split(tx, currency_acc, total_stock_cents)
-                test_acc = self.find_account("Trading.CURRENCY.EUR", self.root)
-                self.goc_EUR_split(tx, test_acc, total_stock_cents)
 
                 # broker_expenses
                 expenses_cents = abs(total_cents) - abs(total_stock_cents)
                 print("total " + str(total_cents)
                         + " stock " + str(total_stock_cents)
                         + " exp " + str(expenses_cents))
-                self.goc_EUR_split(tx, fee_acc, expenses_cents)
+                split = self.goc_EUR_split(tx, fee_acc, expenses_cents)
+
+                #test_acc = self.find_account("Trading.CURRENCY.EUR", self.root)
+                #self.goc_EUR_split(tx, test_acc, total_stock_cents)
+                # test_acc = self.find_account("Assets.Checking Account.Raiba Girokonto", self.root)
+                # split = self.goc_EUR_split(tx, test_acc, 100)
+                # test_acc = self.find_account("Trading.CURRENCY.EUR", self.root)
+                # split = self.goc_stock_split(tx, test_acc, 123, 100)
+
+                # transfer stocks from virtual account to assets account
+                self.goc_stock_split(tx, assets_acc, stock_count, stock_cents)
+                #self.goc_stock_split(tx, trading_acc, -stock_count, stock_cents)
+                # transfer virtual money to counterbalance the valueof the stocks
+                #self.goc_EUR_split(tx, currency_acc, total_stock_cents)
+
+                for split in tx.GetSplitList():
+                    if "Imbalance" in split.GetAccount().get_full_name():
+                        split.SetAccount(currency_acc)
+                        value = GncNumeric(total_stock_cents, self.currency_EUR.get_fraction())
+                        split.SetAmount(value)
+                        split.SetValue(value)
+                        print(dir(split))
+
+
+                print("BEFORE COMMIT --------------------------------------------------------------------------------")
+                self.print_transaction(tx)
+
+                print('imbalances')
+                for (commod, value) in tx.GetImbalance():
+                    print(value.to_string(), commod.get_mnemonic())
+                print('total: ' + str(tx.GetImbalanceValue()))
+
 
                 tx.CommitEdit()
 
-                print("AFTER --------------------------------------------------------------------------------")
+                print("AFTER COMMIT --------------------------------------------------------------------------------")
                 self.print_transaction(tx)
 
+
+                #print([x for x in dir(split) if not x.startswith("_")])
 
 
 
