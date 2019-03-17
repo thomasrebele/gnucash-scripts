@@ -140,6 +140,9 @@ class CashScript:
     def goc_stock_account(self, parent, isin):
         acc = self.find_account_by_isin(parent, isin)
         if acc:
+            print("found " + str(acc.get_full_name()))
+            print("type: " + str(acc.GetType()))
+            #raise ""
             return acc
 
         # create account
@@ -148,6 +151,7 @@ class CashScript:
         if not category:
             category = Account(self.book)
             category.SetName(stock_type)
+            category.SetType(14)
             category.SetCommodity(self.currency_EUR)
             parent.append_child(category)
 
@@ -156,28 +160,39 @@ class CashScript:
         stock_acc = Account(self.book)
         stock_acc.SetName(isin)
         stock_acc.SetCommodity(commodity)
+        stock_acc.SetType(14)
         category.append_child(stock_acc)
+
+        print("created " + stock_acc.get_full_name())
         return stock_acc
 
     #def goc_split(tx
 
-    def goc_split(self, transaction, account, value=None, amount=None):
+    def goc_split(self, transaction, account, value, amount):
+        # search for existing split
+        for split in transaction.GetSplitList():
+            check = split.GetAccount().get_full_name() == account.get_full_name()
+            check = check and split.GetAmount().num() == amount.num()
+            check = check and split.GetAmount().denom() == amount.denom()
+            check = check and split.GetValue().num() == value.num()
+            check = check and split.GetValue().denom() == value.denom()
+
+            if check:
+                return split
+
+        # create new split
         split = Split(self.book)
         split.SetParent(transaction)
         split.SetAccount(account)
         split.SetMemo("automatic")
-        if value:
-            split.SetValue(value)
-        if amount:
-            split.SetAmount(amount)
+        split.SetValue(value)
+        split.SetAmount(amount)
         return split
 
-    def goc_stock_split(self, transaction, account, stock_count, value_cents):
-        split = self.goc_split(transaction, account)
+    def goc_stock_split(self, transaction, account, stock_count, total_value_cents):
         amount = GncNumeric(stock_count, 1)
-        price = GncNumeric(int(value_cents), self.currency_EUR.get_fraction())
-        split.SetSharePriceAndAmount(price, amount)
-        return split
+        value = GncNumeric(total_value_cents, 100)
+        return self.goc_split(transaction, account, value, amount)
 
 
     def goc_EUR_split(self, transaction, account, cents):
@@ -188,7 +203,6 @@ class CashScript:
     def goc_stock_price(self, commodity, cents, datetime_date):
         # TODO: move to right place
         price = GncPrice(self.book)
-        print(dir(price))
         price.set_commodity(commodity)
         price.set_currency(self.currency_EUR)
         price.set_time64(datetime_date)
@@ -227,11 +241,11 @@ class CashScript:
 
                 # find accounts
                 giro_acc = self.find_account_by_number(assets_account, acc_number)
-                trading_acc = self.goc_stock_account(trading_account, isin)
+                #trading_acc = self.goc_stock_account(trading_account, isin)
                 assets_acc = self.goc_stock_account(assets_account, isin)
                 currency_acc = self.find_account("CURRENCY.EUR", trading_account)
                 fee_acc = self.find_account("Expenses.Services.Broker", self.root)
-                stock_commodity = trading_acc.GetCommodity()
+                stock_commodity = assets_acc.GetCommodity()
 
                 # find transaction
                 tx = giro_acc.FindTransByDesc(transaction_info)
@@ -244,11 +258,10 @@ class CashScript:
                 year = int(date[4:8])
                 month = int(date[2:4])
                 day = int(date[0:2])
-                print("day " + str(day) + " month " + str(month) + " year " + str(year))
                 datetime_date = datetime.datetime(year,month,day)
                 self.goc_stock_price(stock_commodity, stock_cents, datetime_date)
 
-                print("BEFORE --------------------------------------------------------------------------------")
+                print("BEFORE ----------------------------------------")
 
                 self.print_transaction(tx)
 
@@ -277,7 +290,7 @@ class CashScript:
                 # split = self.goc_stock_split(tx, test_acc, 123, 100)
 
                 # transfer stocks from virtual account to assets account
-                self.goc_stock_split(tx, assets_acc, stock_count, stock_cents)
+                self.goc_stock_split(tx, assets_acc, stock_count, total_stock_cents)
                 #self.goc_stock_split(tx, trading_acc, -stock_count, stock_cents)
                 # transfer virtual money to counterbalance the valueof the stocks
                 #self.goc_EUR_split(tx, currency_acc, total_stock_cents)
@@ -288,25 +301,16 @@ class CashScript:
                         value = GncNumeric(total_stock_cents, self.currency_EUR.get_fraction())
                         split.SetAmount(value)
                         split.SetValue(value)
-                        print(dir(split))
 
 
-                print("BEFORE COMMIT --------------------------------------------------------------------------------")
+                print("BEFORE COMMIT ----------------------------------------")
                 self.print_transaction(tx)
-
-                print('imbalances')
-                for (commod, value) in tx.GetImbalance():
-                    print(value.to_string(), commod.get_mnemonic())
-                print('total: ' + str(tx.GetImbalanceValue()))
-
 
                 tx.CommitEdit()
 
-                print("AFTER COMMIT --------------------------------------------------------------------------------")
+                print("AFTER COMMIT ----------------------------------------")
                 self.print_transaction(tx)
 
-
-                #print([x for x in dir(split) if not x.startswith("_")])
 
 
 
