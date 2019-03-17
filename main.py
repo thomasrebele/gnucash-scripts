@@ -18,9 +18,11 @@ Options:
 
 from docopt import docopt
 
+import time
+import datetime
 from decimal import Decimal
 import gnucash as gc
-from gnucash import Account, Session, Transaction, Split, GncNumeric, GncCommodity
+from gnucash import Account, Session, Transaction, Split, GncNumeric, GncCommodity, GncPrice
 
 class CashScript:
 
@@ -29,15 +31,29 @@ class CashScript:
         self.book = session.book
         self.root = self.book.get_root_account()
         self.commod_tab = self.book.get_table()
+        self.price_db = self.book.get_price_db()
 
+        commodity = self.goc_stock_commodity("DE000A0JBPG2")
         self.currency_EUR = self.commod_tab.lookup('ISO4217', 'EUR')
+
+        # TODO: move to right place
+        price = GncPrice(self.book)
+        print(dir(price))
+        price.set_commodity(commodity)
+        price.set_currency(self.currency_EUR)
+        millis = datetime.datetime(2199,4,1)
+        price.set_time64(millis)
+        price.set_value(GncNumeric(123,100))
+        price.set_source_string("TODO")
+        self.price_db.add_price(price)
+
 
     def find_account(self, path, account):
         if type(path) == str:
             path = path.split(".")
         child_account = account.lookup_by_name(path[0])
         if child_account is None or child_account.get_instance() is None:
-            raise Exception("Account " + str(relative_name) + " not found")
+            raise Exception("Account " + str(path) + " not found")
         if len(path) > 1:
             return self.find_account(path[1:], child_account)
         return child_account
@@ -118,7 +134,7 @@ class CashScript:
 
         # 'book', 'fullname', 'commodity_namespace', 'mnemonic', 'cusip', and 'fraction'
         name = isin # TODO
-        new_commod = GncCommodity(book, isin, name, isin, isin, 1)
+        new_commod = GncCommodity(self.book, isin, name, isin, isin, 1)
         return self.commod_tab.insert(new_commod)
 
 
@@ -224,7 +240,9 @@ class CashScript:
                 self.goc_stock_split(tx, assets_acc, stock_count, total_stock_cents)
                 self.goc_stock_split(tx, trading_acc, -stock_count, -total_stock_cents)
                 # transfer virtual money to counterbalance the valueof the stocks
-                self.goc_EUR_split(tx, currency_acc, total_stock_cents)
+                #self.goc_EUR_split(tx, currency_acc, total_stock_cents)
+                test_acc = self.find_account("Trading.CURRENCY.EUR", self.root)
+                self.goc_EUR_split(tx, test_acc, total_stock_cents)
 
                 # broker_expenses
                 expenses_cents = abs(total_cents) - abs(total_stock_cents)
