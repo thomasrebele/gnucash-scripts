@@ -1,7 +1,7 @@
 """Gnucash Scripts
 
 Usage:
-  main.py [options] portfolio <csv_file> [assets <assets_account>] [trading <trading_account>]
+  main.py [options] portfolio <csv_file> [(checking <checking_root>)] [(invest <invest_root>)]
   main.py [options]
 
 Options:
@@ -18,11 +18,18 @@ Options:
 
 from docopt import docopt
 
+import bs4
 import time
 import datetime
+import requests
 from decimal import Decimal
 import gnucash as gc
-from gnucash import Account, Session, Transaction, Split, GncNumeric, GncCommodity, GncPrice
+from gnucash import Account, Session, Transaction, Split, GncNumeric, GncCommodity, GncPrice, ACCT_TYPE_STOCK
+
+translation = {
+    "Aktien": "Stock",
+    "Fonds": "Fund",
+    }
 
 class CashScript:
 
@@ -126,18 +133,23 @@ class CashScript:
         #for split in account.GetSplitList():
         #    self.print_split(split)
 
-    def goc_stock_commodity(self, isin):
+    def goc_stock_commodity(self, isin, name=None, namespace=None):
         # lookup onvista, e.g.  https://www.onvista.de/LU1737652583
         # parse first part of URL
         # commodity mnemonic needs to be unique for namespace
 
+        if not name:
+            name = isin
+
+        if not namespace:
+            namespace = "UNKNOWN"
+
         # 'book', 'fullname', 'commodity_namespace', 'mnemonic', 'cusip', and 'fraction'
-        name = isin # TODO
-        new_commod = GncCommodity(self.book, isin, name, isin, isin, 1)
+        new_commod = GncCommodity(self.book, name, namespace, isin, isin, 1)
         return self.commod_tab.insert(new_commod)
 
 
-    def goc_stock_account(self, parent, isin):
+    def goc_stock_account(self, parent, isin, account_type):
         acc = self.find_account_by_isin(parent, isin)
         if acc:
             print("found " + str(acc.get_full_name()))
@@ -145,28 +157,35 @@ class CashScript:
             #raise ""
             return acc
 
+        # find type
+        url = "https://onvista.de/" + isin
+        r = requests.get(url)
+        parts = r.url.split("/")[3:]
+
+        namespace = parts[0].title()
+        namespace = translation.get(namespace, namespace)
+        fullname = "-".join(parts[1].split("-")[:-2])
+
         # create account
-        stock_type = "TODO"
+        stock_type = namespace
         category = parent.lookup_by_name(stock_type)
         if not category:
             category = Account(self.book)
             category.SetName(stock_type)
-            category.SetType(14)
+            category.SetType(account_type)
             category.SetCommodity(self.currency_EUR)
             parent.append_child(category)
 
         # TODO account type
-        commodity = self.goc_stock_commodity(isin)
+        commodity = self.goc_stock_commodity(isin, name=fullname, namespace=namespace)
         stock_acc = Account(self.book)
-        stock_acc.SetName(isin)
+        stock_acc.SetName(fullname)
         stock_acc.SetCommodity(commodity)
-        stock_acc.SetType(14)
+        stock_acc.SetType(account_type)
         category.append_child(stock_acc)
 
         print("created " + stock_acc.get_full_name())
         return stock_acc
-
-    #def goc_split(tx
 
     def goc_split(self, transaction, account, value, amount):
         # search for existing split
@@ -201,7 +220,7 @@ class CashScript:
         return self.goc_split(transaction, account, value, amount)
 
     def goc_stock_price(self, commodity, cents, datetime_date):
-        # TODO: move to right place
+        # TODO: check if exists
         price = GncPrice(self.book)
         price.set_commodity(commodity)
         price.set_currency(self.currency_EUR)
@@ -210,10 +229,9 @@ class CashScript:
         price.set_source_string("TODO")
         self.price_db.add_price(price)
 
-    def read_portfolio_transactions(self, csv_file, assets_account, trading_account):
+    def read_portfolio_transactions(self, csv_file, checking_root, invest_root):
         with open(csv_file, "r", encoding="iso-8859-1") as f:
             id_to_acc = {}
-
 
             for i, line in enumerate(f):
                 if i==0: continue
@@ -240,11 +258,10 @@ class CashScript:
                     raise "ERROR: only integer amount of stocks allowed"
 
                 # find accounts
-                giro_acc = self.find_account_by_number(assets_account, acc_number)
-                #trading_acc = self.goc_stock_account(trading_account, isin)
-                assets_acc = self.goc_stock_account(assets_account, isin)
-                currency_acc = self.find_account("CURRENCY.EUR", trading_account)
+                giro_acc = self.find_account_by_number(checking_root, acc_number)
+                assets_acc = self.goc_stock_account(invest_root, isin, ACCT_TYPE_STOCK)
                 fee_acc = self.find_account("Expenses.Services.Broker", self.root)
+                currency_acc = self.find_account("Trading.CURRENCY.EUR", self.root)
                 stock_commodity = assets_acc.GetCommodity()
 
                 # find transaction
@@ -261,54 +278,33 @@ class CashScript:
                 datetime_date = datetime.datetime(year,month,day)
                 self.goc_stock_price(stock_commodity, stock_cents, datetime_date)
 
-                print("BEFORE ----------------------------------------")
-
-                self.print_transaction(tx)
-
                 # find split with the spent money
                 sp_giro = self.find_split_by_account(tx, giro_acc)
 
                 if not sp_giro:
                     raise "ERROR: split not found"
 
-                total_cents = sp_giro.GetValue().num()
 
                 tx.BeginEdit()
 
                 # broker_expenses
+                total_cents = sp_giro.GetValue().num()
                 expenses_cents = abs(total_cents) - abs(total_stock_cents)
-                print("total " + str(total_cents)
-                        + " stock " + str(total_stock_cents)
-                        + " exp " + str(expenses_cents))
-                split = self.goc_EUR_split(tx, fee_acc, expenses_cents)
+                self.goc_EUR_split(tx, fee_acc, expenses_cents)
 
-                #test_acc = self.find_account("Trading.CURRENCY.EUR", self.root)
-                #self.goc_EUR_split(tx, test_acc, total_stock_cents)
-                # test_acc = self.find_account("Assets.Checking Account.Raiba Girokonto", self.root)
-                # split = self.goc_EUR_split(tx, test_acc, 100)
-                # test_acc = self.find_account("Trading.CURRENCY.EUR", self.root)
-                # split = self.goc_stock_split(tx, test_acc, 123, 100)
-
-                # transfer stocks from virtual account to assets account
                 self.goc_stock_split(tx, assets_acc, stock_count, total_stock_cents)
-                #self.goc_stock_split(tx, trading_acc, -stock_count, stock_cents)
-                # transfer virtual money to counterbalance the valueof the stocks
-                #self.goc_EUR_split(tx, currency_acc, total_stock_cents)
 
                 for split in tx.GetSplitList():
                     if "Imbalance" in split.GetAccount().get_full_name():
+#                        split.Destroy()
                         split.SetAccount(currency_acc)
                         value = GncNumeric(total_stock_cents, self.currency_EUR.get_fraction())
                         split.SetAmount(value)
                         split.SetValue(value)
 
 
-                print("BEFORE COMMIT ----------------------------------------")
-                self.print_transaction(tx)
-
                 tx.CommitEdit()
 
-                print("AFTER COMMIT ----------------------------------------")
                 self.print_transaction(tx)
 
 
@@ -325,12 +321,11 @@ if __name__ == '__main__':
         root = book.get_root_account()
 
         if args["portfolio"]:
-            assets_path = args["<assets_account>"] or "Assets"
-            trading_path = args["<trading_account>"] or "Trading"
-            assets_acc = cs.find_account(assets_path, root)
-            cs.print_account(assets_acc)
-            trading_acc = cs.find_account(trading_path, root)
-            cs.read_portfolio_transactions(args["<csv_file>"], assets_acc, trading_acc)
+            checking_root_path = args["<checking_root>"] or "Assets.Current Assets.Checking Account"
+            invest_root_path = args["<invest_root>"] or "Assets.Investments"
+            checking_root = cs.find_account(checking_root_path, root)
+            invest_root = cs.find_account(invest_root_path, root)
+            cs.read_portfolio_transactions(args["<csv_file>"], checking_root, invest_root)
 
         # print(dir(root))
         # cs.print_accounts(root)
