@@ -127,12 +127,6 @@ class CashScript:
         print("  quote source: " + str(commodity.get_quote_source()))
         print("  quote tz: " + str(commodity.get_quote_tz()))
 
-    def print_transactions(self, account):
-        # TODO: use description to find transaction
-        pass
-        #for split in account.GetSplitList():
-        #    self.print_split(split)
-
     def goc_stock_commodity(self, isin, name=None, namespace=None):
         # lookup onvista, e.g.  https://www.onvista.de/LU1737652583
         # parse first part of URL
@@ -176,7 +170,6 @@ class CashScript:
             category.SetCommodity(self.currency_EUR)
             parent.append_child(category)
 
-        # TODO account type
         commodity = self.goc_stock_commodity(isin, name=fullname, namespace=namespace)
         stock_acc = Account(self.book)
         stock_acc.SetName(fullname)
@@ -220,13 +213,11 @@ class CashScript:
         return self.goc_split(transaction, account, value, amount)
 
     def goc_stock_price(self, commodity, cents, datetime_date):
-        # TODO: check if exists
         price = GncPrice(self.book)
         price.set_commodity(commodity)
         price.set_currency(self.currency_EUR)
         price.set_time64(datetime_date)
         price.set_value(GncNumeric(cents,100))
-        price.set_source_string("TODO")
         self.price_db.add_price(price)
 
     def read_portfolio_transactions(self, csv_file, checking_root, invest_root):
