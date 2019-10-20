@@ -139,7 +139,7 @@ class CashScript:
             namespace = "UNKNOWN"
 
         # 'book', 'fullname', 'commodity_namespace', 'mnemonic', 'cusip', and 'fraction'
-        new_commod = GncCommodity(self.book, name, namespace, isin, isin, 1)
+        new_commod = GncCommodity(self.book, name, namespace, isin, isin, 1000)
         return self.commod_tab.insert(new_commod)
 
 
@@ -184,10 +184,8 @@ class CashScript:
         # search for existing split
         for split in transaction.GetSplitList():
             check = split.GetAccount().get_full_name() == account.get_full_name()
-            check = check and split.GetAmount().num() == amount.num()
-            check = check and split.GetAmount().denom() == amount.denom()
-            check = check and split.GetValue().num() == value.num()
-            check = check and split.GetValue().denom() == value.denom()
+            check = check and split.GetAmount().num() * amount.denom() == amount.num() * split.GetAmount().denom()
+            check = check and split.GetValue().num() * value.denom() == value.num() * split.GetValue().denom()
 
             if check:
                 return split
@@ -202,7 +200,7 @@ class CashScript:
         return split
 
     def goc_stock_split(self, transaction, account, stock_count, total_value_cents):
-        amount = GncNumeric(stock_count, 1)
+        amount = GncNumeric(int(stock_count*1000), 1000)
         value = GncNumeric(total_value_cents, 100)
         return self.goc_split(transaction, account, value, amount)
 
@@ -240,13 +238,10 @@ class CashScript:
                 price = row[9]
                 depot = row[10]
 
-                stock_count = int(nominal.replace(",000",""))
+                stock_count = Decimal(nominal.replace(",","."))
                 stock_price = Decimal(price.replace(",","."))
                 stock_cents = int(stock_price * 100)
                 total_stock_cents = int(stock_count * stock_price * 100)
-
-                if not nominal.endswith(",000"):
-                    raise "ERROR: only integer amount of stocks allowed"
 
                 # find accounts
                 giro_acc = self.find_account_by_number(checking_root, acc_number)
@@ -260,6 +255,7 @@ class CashScript:
 
                 if not tx:
                     print("ERROR: transaction not found for " + line)
+                    print("transaction info: " + str(transaction_info))
                     continue
 
                 # parse date
