@@ -25,9 +25,9 @@ Compile Gnucash
 git clone --depth 100 https://github.com/Gnucash/gnucash.git
 cd gnucash
 GC=$(realpath .)
-mkdir build-3.4
-cd build-3.4
-cmake -DWITH_PYTHON=ON  -DCMAKE_INSTALL_PREFIX=$GC/install-3.4/ -DCMAKE_PREFIX_PATH=$GC/install-3.4/ -DGTEST_ROOT=/usr/src/googletest/googletest/ -DGMOCK_ROOT=/usr/src/gmock/ ../
+mkdir build-3.7
+cd build-3.7
+cmake -DWITH_PYTHON=ON  -DCMAKE_INSTALL_PREFIX=$GC/install-3.7/ -DCMAKE_PREFIX_PATH=$GC/install-3.7/ -DGTEST_ROOT=/usr/src/googletest/googletest/ -DGMOCK_ROOT=/usr/src/gmock/ ../
 
 make -j4
 make install
