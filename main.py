@@ -71,6 +71,24 @@ class CashScript:
             if found:
                 return found
 
+    def find_transaction(self, account, date, desc):
+        """Searches for the transaction in account with the specified date and description."""
+
+        account.SortSplits(True)
+        splits = account.GetSplitList()
+        candidates = []
+        for split in splits:
+            tx = split.GetParent()
+
+            if date.date() == tx.GetDate().date() and desc == tx.GetDescription():
+                candidates.append(tx)
+
+        if len(candidates) != 1:
+            print("Could not find transaction " + str(desc) + " on " + str(date.date()) + " because there are " + str(len(candidates)) + " candidates")
+            return None
+
+        return candidates[0]
+
     def find_split_by_account(self, transaction, account):
         for split in transaction.GetSplitList():
             if split.GetAccount().get_full_name() == account.get_full_name():
@@ -100,6 +118,7 @@ class CashScript:
         print()
 
     def print_transaction(self, transaction):
+        print("Transaction " + str(transaction))
         if not transaction:
             print("NO TRANSACTION")
             return
@@ -243,6 +262,12 @@ class CashScript:
                 stock_cents = int(stock_price * 100)
                 total_stock_cents = int(stock_count * stock_price * 100)
 
+                # parse date
+                year = int(date[4:8])
+                month = int(date[2:4])
+                day = int(date[0:2])
+                datetime_date = datetime.datetime(year,month,day)
+
                 # find accounts
                 giro_acc = self.find_account_by_number(checking_root, acc_number)
                 assets_acc = self.goc_stock_account(invest_root, isin, ACCT_TYPE_STOCK)
@@ -251,18 +276,13 @@ class CashScript:
                 stock_commodity = assets_acc.GetCommodity()
 
                 # find transaction
-                tx = giro_acc.FindTransByDesc(transaction_info)
+                tx = self.find_transaction(giro_acc, datetime_date, transaction_info)
 
                 if not tx:
                     print("ERROR: transaction not found for " + line)
                     print("transaction info: " + str(transaction_info))
                     continue
 
-                # parse date
-                year = int(date[4:8])
-                month = int(date[2:4])
-                day = int(date[0:2])
-                datetime_date = datetime.datetime(year,month,day)
                 self.goc_stock_price(stock_commodity, stock_cents, datetime_date)
 
                 # find split with the spent money
