@@ -43,6 +43,15 @@ class CashScript:
 
         self.currency_EUR = self.commod_tab.lookup('ISO4217', 'EUR')
 
+        self.split_fmt = [
+            ("{:80}", "account", lambda s: self.tostring_account(s.GetAccount())),
+            ("{:>20}", "value", lambda s: s.GetValue()),
+            ("{:>20}", "amount", lambda s: s.GetAmount()),
+            ("{:>25}", "share price", lambda s: s.GetSharePrice()),
+            ("{:>7}", "rec.", lambda s: s.GetReconcile()),
+            ("{:>20}", "memo", lambda s: s.GetMemo()),
+            ]
+
 
     def find_account(self, path, account=None):
         if not account:
@@ -149,29 +158,23 @@ class CashScript:
             #+ "  balance: " + str(split.GetBalance())
             )
 
+    def print_split_row(self, split, prefix="  "):
+        s = prefix
+        for f in self.split_fmt:
+            s += f[0].format(str(f[2](split)))
+        print(s)
+
     def print_transaction(self, transaction):
         if not transaction:
             print("NO TRANSACTION")
             return
         print("Transaction on " + str(transaction.GetDate()) + ": " + str(transaction.GetDescription()) + " (" + str(transaction.GetNum()) + ")")
 
-        fmt = [
-            ("{:80}", "account", lambda s: self.tostring_account(s.GetAccount())),
-            ("{:>20}", "value", lambda s: s.GetValue()),
-            ("{:>20}", "amount", lambda s: s.GetAmount()),
-            ("{:>25}", "share price", lambda s: s.GetSharePrice()),
-            ("{:>7}", "rec.", lambda s: s.GetReconcile()),
-            ("{:>20}", "memo", lambda s: s.GetMemo()),
-            ]
-
-        print("".join([f.format(h) for (f, h, _) in fmt]))
+        print("".join([f.format(h) for (f, h, _) in self.split_fmt]))
 
         for split in transaction.GetSplitList():
-            acc = self.tostring_account(split.GetAccount())
-            s = "  "
-            for f in fmt:
-                s += f[0].format(str(f[2](split)))
-            print(s)
+            self.print_split_row(split)
+
         pass
 
     def print_accounts(self, account, prefix="  "):
@@ -286,12 +289,9 @@ class CashScript:
     def read_statement_transactions(self, tsv_file, giro_acc):
         with open(tsv_file) as f:
             for i, line in enumerate(f):
-                print(line)
                 if line.startswith("#"):
                     continue
-
                 row = line.rstrip("\n").split("\t")
-                print(row)
 
                 date = row[0]
                 description = row[4]
@@ -304,16 +304,9 @@ class CashScript:
                 props = {"num": num, "value": GncNumeric(cents, self.currency_EUR.get_fraction())}
                 tx = self.find_transaction(giro_acc, datetime_date, description, props)
 
-                info = (" date: " + str(date)
-                        + " desc: " + str(description)
-                        + " num: " + str(num)
-                        + " value: " + str(value))
-
                 created_timestamp = None
-                if tx:
-                    print("  updating " + info)
-                else:
-                    print("  creating " + info)
+                updated = False
+                if not tx:
                     tx = Transaction(self.book)
                     created_timestamp = datetime.now()
 
@@ -321,15 +314,27 @@ class CashScript:
                 if created_timestamp:
                     tx.SetDateEnteredSecs(created_timestamp)
 
-                tx.SetCurrency(self.currency_EUR)
                 tx.SetDate(datetime_date.day, datetime_date.month, datetime_date.year)
                 tx.SetDescription(description)
-                tx.SetNum(num)
+                if not tx.GetCurrency() or tx.GetCurrency().get_unique_name() != self.currency_EUR.get_unique_name():
+                    updated = True
+                    tx.SetCurrency(self.currency_EUR)
+                if tx.GetNum() != num:
+                    updated = True
+                    tx.SetNum(num)
 
-                self.goc_EUR_split(tx, giro_acc, cents)
+                split = self.goc_EUR_split(tx, giro_acc, cents)
+                if created_timestamp or updated:
+                    info = (" date: " + str(date)
+                        + " desc: " + str(description)
+                        + " num: " + str(num)
+                        + " value: " + str(value))
+                    if created_timestamp:
+                        print("  creating " + info)
+                    else:
+                        print("  updating " + info)
+                    self.print_split_row(split, prefix="       ")
                 tx.CommitEdit()
-
-                self.print_transaction(tx)
 
 
     def read_portfolio_transactions(self, tsv_file, checking_root, invest_root):
