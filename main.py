@@ -321,7 +321,7 @@ class CashScript:
 
                 # broker_expenses
                 total_cents = sp_giro.GetValue().num()
-                expenses_cents = abs(total_cents) - abs(total_stock_cents)
+                expenses_cents = abs(abs(total_cents) - abs(total_stock_cents))
                 self.goc_EUR_split(tx, fee_acc, expenses_cents)
 
                 self.goc_stock_split(tx, assets_acc, stock_count, total_stock_cents)
