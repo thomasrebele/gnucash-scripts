@@ -1,7 +1,7 @@
 """Gnucash Scripts
 
 Usage:
-  main.py [options] portfolio <csv_file> [(checking <checking_root>)] [(invest <invest_root>)]
+  main.py [options] portfolio <tsv_file> [(checking <checking_root>)] [(invest <invest_root>)]
   main.py [options]
 
 Options:
@@ -20,7 +20,7 @@ from docopt import docopt
 
 import bs4
 import time
-import datetime
+from datetime import datetime
 import requests
 from decimal import Decimal
 import gnucash as gc
@@ -132,11 +132,11 @@ class CashScript:
         print("Transaction on " + str(transaction.GetDate()) + ": " + str(transaction.GetDescription()))
 
         fmt = [
-            ("{:60}", "account", lambda s: self.tostring_account(s.GetAccount())),
+            ("{:80}", "account", lambda s: self.tostring_account(s.GetAccount())),
             ("{:>20}", "value", lambda s: s.GetValue()),
             ("{:>20}", "amount", lambda s: s.GetAmount()),
             ("{:>25}", "share price", lambda s: s.GetSharePrice()),
-            ("{:>15}", "reconcile", lambda s: s.GetReconcile()),
+            ("{:>7}", "rec.", lambda s: s.GetReconcile()),
             ("{:>20}", "memo", lambda s: s.GetMemo()),
             ]
 
@@ -259,8 +259,8 @@ class CashScript:
         price.set_value(GncNumeric(cents,100))
         self.price_db.add_price(price)
 
-    def read_portfolio_transactions(self, csv_file, checking_root, invest_root):
-        with open(csv_file, "r", encoding="iso-8859-1") as f:
+    def read_portfolio_transactions(self, tsv_file, checking_root, invest_root):
+        with open(tsv_file) as f:
             id_to_acc = {}
 
             for i, line in enumerate(f):
@@ -269,7 +269,7 @@ class CashScript:
                 if line.startswith("#"):
                     continue
 
-                row = line.rstrip("\n").split(";")
+                row = line.rstrip("\n").split("\t")
                 print()
                 print(row)
                 acc_number = row[0]
@@ -288,10 +288,7 @@ class CashScript:
                 total_stock_cents = int(stock_count * stock_price * 100)
 
                 # parse date
-                year = int(date[4:8])
-                month = int(date[2:4])
-                day = int(date[0:2])
-                datetime_date = datetime.datetime(year,month,day)
+                datetime_date = datetime.fromisoformat(date)
 
                 # find accounts
                 giro_acc = self.find_account_by_number(checking_root, acc_number)
@@ -322,7 +319,8 @@ class CashScript:
                 # broker_expenses
                 total_cents = sp_giro.GetValue().num()
                 expenses_cents = abs(abs(total_cents) - abs(total_stock_cents))
-                self.goc_EUR_split(tx, fee_acc, expenses_cents)
+                if expenses_cents > 0:
+                    self.goc_EUR_split(tx, fee_acc, expenses_cents)
 
                 self.goc_stock_split(tx, assets_acc, stock_count, total_stock_cents)
 
@@ -357,7 +355,7 @@ if __name__ == '__main__':
             invest_root_path = args["<invest_root>"] or "Assets.Investments"
             checking_root = cs.find_account(checking_root_path, root)
             invest_root = cs.find_account(invest_root_path, root)
-            cs.read_portfolio_transactions(args["<csv_file>"], checking_root, invest_root)
+            cs.read_portfolio_transactions(args["<tsv_file>"], checking_root, invest_root)
 
         # print(dir(root))
         # cs.print_accounts(root)
