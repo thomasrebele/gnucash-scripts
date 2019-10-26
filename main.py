@@ -2,6 +2,7 @@
 
 Usage:
   main.py [options] portfolio <tsv_file> [(checking <checking_root>)] [(invest <invest_root>)]
+  main.py [options] statement <tsv_file> [(checking <checking_root>)]
   main.py [options]
 
 Options:
@@ -71,16 +72,39 @@ class CashScript:
             if found:
                 return found
 
-    def find_transaction(self, account, date, desc):
-        """Searches for the transaction in account with the specified date and description."""
+    def find_transaction(self, account, date, desc, props={}):
+        """Searches for the transaction in account with the specified date and description.
+        Additional properties might be given which restricts the search.
+        However, those are not obligatory.
+        """
 
         account.SortSplits(True)
         splits = account.GetSplitList()
         candidates = []
+
+        def check_split(split):
+            """Returns true if the split corresponds to the constraints"""
+            if date.date() != tx.GetDate().date() or desc != tx.GetDescription():
+                return False
+
+            for p_name, p_val in props.items():
+                if p_name == "num":
+                    split_val = split.GetParent().GetNum()
+                    if split_val == "":
+                        continue
+                    if split_val != p_val:
+                        return False
+
+                if p_name == "value":
+                    split_val = split.GetValue()
+                    if split_val.num() * p_val.denom() != p_val.num() * split_val.denom():
+                        return False
+
+            return True
+
         for split in splits:
             tx = split.GetParent()
-
-            if date.date() == tx.GetDate().date() and desc == tx.GetDescription():
+            if check_split(split):
                 candidates.append(tx)
 
         if len(candidates) != 1:
@@ -129,7 +153,7 @@ class CashScript:
         if not transaction:
             print("NO TRANSACTION")
             return
-        print("Transaction on " + str(transaction.GetDate()) + ": " + str(transaction.GetDescription()))
+        print("Transaction on " + str(transaction.GetDate()) + ": " + str(transaction.GetDescription()) + " (" + str(transaction.GetNum()) + ")")
 
         fmt = [
             ("{:80}", "account", lambda s: self.tostring_account(s.GetAccount())),
@@ -259,10 +283,57 @@ class CashScript:
         price.set_value(GncNumeric(cents,100))
         self.price_db.add_price(price)
 
+    def read_statement_transactions(self, tsv_file, giro_acc):
+        with open(tsv_file) as f:
+            for i, line in enumerate(f):
+                print(line)
+                if line.startswith("#"):
+                    continue
+
+                row = line.rstrip("\n").split("\t")
+                print(row)
+
+                date = row[0]
+                description = row[4]
+                num = row[5]
+                value = row[9]
+                cents = int(value.replace(",",""))
+
+                datetime_date = datetime.fromisoformat(date)
+
+                props = {"num": num, "value": GncNumeric(cents, self.currency_EUR.get_fraction())}
+                tx = self.find_transaction(giro_acc, datetime_date, description, props)
+
+                info = (" date: " + str(date)
+                        + " desc: " + str(description)
+                        + " num: " + str(num)
+                        + " value: " + str(value))
+
+                created_timestamp = None
+                if tx:
+                    print("  updating " + info)
+                else:
+                    print("  creating " + info)
+                    tx = Transaction(self.book)
+                    created_timestamp = datetime.now()
+
+                tx.BeginEdit()
+                if created_timestamp:
+                    tx.SetDateEnteredSecs(created_timestamp)
+
+                tx.SetCurrency(self.currency_EUR)
+                tx.SetDate(datetime_date.day, datetime_date.month, datetime_date.year)
+                tx.SetDescription(description)
+                tx.SetNum(num)
+
+                self.goc_EUR_split(tx, giro_acc, cents)
+                tx.CommitEdit()
+
+                self.print_transaction(tx)
+
+
     def read_portfolio_transactions(self, tsv_file, checking_root, invest_root):
         with open(tsv_file) as f:
-            id_to_acc = {}
-
             for i, line in enumerate(f):
                 if i==0: continue
 
@@ -298,6 +369,7 @@ class CashScript:
                 stock_commodity = assets_acc.GetCommodity()
 
                 # find transaction
+                # TODO: add props
                 tx = self.find_transaction(giro_acc, datetime_date, transaction_info)
 
                 if not tx:
@@ -356,6 +428,12 @@ if __name__ == '__main__':
             checking_root = cs.find_account(checking_root_path, root)
             invest_root = cs.find_account(invest_root_path, root)
             cs.read_portfolio_transactions(args["<tsv_file>"], checking_root, invest_root)
+
+        if args["statement"]:
+            checking_root_path = args["<checking_root>"] or "Assets.Current Assets.Checking Account"
+            checking_root = cs.find_account(checking_root_path, root)
+            cs.read_statement_transactions(args["<tsv_file>"], checking_root)
+
 
         # print(dir(root))
         # cs.print_accounts(root)
