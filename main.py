@@ -95,35 +95,59 @@ class CashScript:
                 return split
 
 
-    def print_account(self, account, prefix="   "):
+    def tostring_account(self, account):
         if account:
-            print(prefix + account.get_full_name() + " (" + account.GetCommodity().get_fullname() + ")")
+            name = account.get_full_name()
+            cmd = account.GetCommodity().get_fullname()
+            if '.' in name:
+                suffix = name[name.rindex('.')+1:]
+                if suffix == cmd:
+                    return name
+
+            return name + " (" + cmd + ")"
         else:
-            print(prefix + "NO ACCOUNT FOUND")
+            return "NO ACCOUNT FOUND"
+
+    def print_account(self, account, prefix="   "):
+        print(prefix + self.tostring_account(account))
 
     def print_split(self, split):
         account = split.GetAccount()
-        self.print_account(account, prefix="split for ")
-        print("  value: " + str(split.GetValue())
+        print("split: "
+            + "  " + self.tostring_account(account)
+            + "  value: " + str(split.GetValue())
             + "  amount: " + str(split.GetAmount())
             + "  memo: " + split.GetMemo()
-            + "  action: " + split.GetAction()
             + "  share price: " + str(split.GetSharePrice())
-            + "  lot: " + str(split.GetLot())
             + "  reconcile: " + str(split.GetReconcile())
-            + "  base value: " + str(split.GetBaseValue(account.GetCommodity()))
+            #+ "  action: " + split.GetAction()
+            #+ "  base value: " + str(split.GetBaseValue(account.GetCommodity()))
             #+ "  balance: " + str(split.GetBalance())
             )
 
-        print()
-
     def print_transaction(self, transaction):
-        print("Transaction " + str(transaction))
         if not transaction:
             print("NO TRANSACTION")
             return
+        print("Transaction on " + str(transaction.GetDate()) + ": " + str(transaction.GetDescription()))
+
+        fmt = [
+            ("{:60}", "account", lambda s: self.tostring_account(s.GetAccount())),
+            ("{:>20}", "value", lambda s: s.GetValue()),
+            ("{:>20}", "amount", lambda s: s.GetAmount()),
+            ("{:>25}", "share price", lambda s: s.GetSharePrice()),
+            ("{:>15}", "reconcile", lambda s: s.GetReconcile()),
+            ("{:>20}", "memo", lambda s: s.GetMemo()),
+            ]
+
+        print("".join([f.format(h) for (f, h, _) in fmt]))
+
         for split in transaction.GetSplitList():
-            self.print_split(split)
+            acc = self.tostring_account(split.GetAccount())
+            s = "  "
+            for f in fmt:
+                s += f[0].format(str(f[2](split)))
+            print(s)
         pass
 
     def print_accounts(self, account, prefix="  "):
@@ -165,9 +189,7 @@ class CashScript:
     def goc_stock_account(self, parent, isin, account_type):
         acc = self.find_account_by_isin(parent, isin)
         if acc:
-            print("found " + str(acc.get_full_name()))
-            print("type: " + str(acc.GetType()))
-            #raise ""
+            print("found " + str(acc.get_full_name()) + ", type: " + str(acc.GetType()))
             return acc
 
         # find type
@@ -243,6 +265,9 @@ class CashScript:
 
             for i, line in enumerate(f):
                 if i==0: continue
+
+                if line.startswith("#"):
+                    continue
 
                 row = line.rstrip("\n").split(";")
                 print()
