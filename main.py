@@ -353,8 +353,6 @@ class CashScript:
             tx_to_id = defaultdict(lambda: 0)
 
             for i, line in enumerate(f):
-                if i==0: continue
-
                 if line.startswith("#"):
                     continue
 
