@@ -26,6 +26,7 @@ import requests
 from decimal import Decimal
 import gnucash as gc
 from gnucash import Account, Session, Transaction, Split, GncNumeric, GncCommodity, GncPrice, ACCT_TYPE_STOCK
+from collections import defaultdict
 
 translation = {
     "Aktien": "Stock",
@@ -81,7 +82,7 @@ class CashScript:
             if found:
                 return found
 
-    def find_transaction(self, account, date, desc, props={}):
+    def find_transaction(self, account, date, desc, props={}, idx=None):
         """Searches for the transaction in account with the specified date and description.
         Additional properties might be given which restricts the search.
         However, those are not obligatory.
@@ -116,11 +117,20 @@ class CashScript:
             if check_split(split):
                 candidates.append(tx)
 
-        if len(candidates) != 1:
-            print("Could not find transaction " + str(desc) + " on " + str(date.date()) + " because there are " + str(len(candidates)) + " candidates")
-            return None
+        if idx == None:
+            if len(candidates) != 1:
+                print("Could not find transaction " + str(desc) + " on " + str(date.date()) + " because there are " + str(len(candidates)) + " candidates")
+                return None
+            idx = 0
+        else:
+            if len(candidates) == 0:
+                print("Could not find transaction " + str(desc) + " on " + str(date.date()) + " because there are " + str(len(candidates)) + " candidates")
+                return None
 
-        return candidates[0]
+        if len(candidates) > 1:
+            candidates.sort(key=lambda tx: int(tx.GetNum()))
+
+        return candidates[idx]
 
     def find_split_by_account(self, transaction, account):
         for split in transaction.GetSplitList():
@@ -339,6 +349,9 @@ class CashScript:
 
     def read_portfolio_transactions(self, tsv_file, checking_root, invest_root):
         with open(tsv_file) as f:
+            # count how many transactions we have seen on the same day with the same description
+            tx_to_id = defaultdict(lambda: 0)
+
             for i, line in enumerate(f):
                 if i==0: continue
 
@@ -362,8 +375,8 @@ class CashScript:
                 stock_cents = int(stock_price * 100)
                 total_stock_cents = int(stock_count * stock_price * 100)
 
-                if total_stock_cents == 0:
-                    print("WARNING: ignoring " + str(line))
+                if total_stock_cents == 0 or "Dividendenzahlung" in transaction_info:
+                    print("WARNING: ignoring " + str(line.rstrip("\n")))
                     continue
 
                 # parse date
@@ -377,8 +390,9 @@ class CashScript:
                 stock_commodity = assets_acc.GetCommodity()
 
                 # find transaction
-                # TODO: add props
-                tx = self.find_transaction(giro_acc, datetime_date, transaction_info)
+                key = (datetime_date.date(), transaction_info)
+                tx = self.find_transaction(giro_acc, datetime_date, transaction_info, idx=tx_to_id[key])
+                tx_to_id[key] += 1
 
                 if not tx:
                     print("ERROR: transaction not found for " + line)
@@ -419,7 +433,7 @@ class CashScript:
 
                 if updated:
                     print()
-                    print(line)
+                    print("  imported " + line)
                     self.print_transaction(tx)
 
 
