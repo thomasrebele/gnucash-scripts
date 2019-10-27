@@ -216,7 +216,6 @@ class CashScript:
     def goc_stock_account(self, parent, isin, account_type):
         acc = self.find_account_by_isin(parent, isin)
         if acc:
-            print("found " + str(acc.get_full_name()) + ", type: " + str(acc.GetType()))
             return acc
 
         # find type
@@ -249,6 +248,7 @@ class CashScript:
         return stock_acc
 
     def goc_split(self, transaction, account, value, amount):
+        """Search or create a split. Returns split, isNew."""
         # search for existing split
         for split in transaction.GetSplitList():
             check = split.GetAccount().get_full_name() == account.get_full_name()
@@ -256,7 +256,7 @@ class CashScript:
             check = check and split.GetValue().num() * value.denom() == value.num() * split.GetValue().denom()
 
             if check:
-                return split
+                return split, False
 
         # create new split
         split = Split(self.book)
@@ -265,7 +265,7 @@ class CashScript:
         split.SetMemo("automatic")
         split.SetValue(value)
         split.SetAmount(amount)
-        return split
+        return split, True
 
     def goc_stock_split(self, transaction, account, stock_count, total_value_cents):
         amount = GncNumeric(int(stock_count*1000), 1000)
@@ -323,8 +323,8 @@ class CashScript:
                     updated = True
                     tx.SetNum(num)
 
-                split = self.goc_EUR_split(tx, giro_acc, cents)
-                if created_timestamp or updated:
+                split, isNew = self.goc_EUR_split(tx, giro_acc, cents)
+                if created_timestamp or updated or isNew:
                     info = (" date: " + str(date)
                         + " desc: " + str(description)
                         + " num: " + str(num)
@@ -346,8 +346,7 @@ class CashScript:
                     continue
 
                 row = line.rstrip("\n").split("\t")
-                print()
-                print(row)
+
                 acc_number = row[0]
                 date = row[1]
                 valuta = row[2]
@@ -362,6 +361,10 @@ class CashScript:
                 stock_price = Decimal(price.replace(",","."))
                 stock_cents = int(stock_price * 100)
                 total_stock_cents = int(stock_count * stock_price * 100)
+
+                if total_stock_cents == 0:
+                    print("WARNING: ignoring " + str(line))
+                    continue
 
                 # parse date
                 datetime_date = datetime.fromisoformat(date)
@@ -390,29 +393,34 @@ class CashScript:
                 if not sp_giro:
                     raise "ERROR: split not found"
 
-
+                updated = False
                 tx.BeginEdit()
 
                 # broker_expenses
                 total_cents = sp_giro.GetValue().num()
                 expenses_cents = abs(abs(total_cents) - abs(total_stock_cents))
                 if expenses_cents > 0:
-                    self.goc_EUR_split(tx, fee_acc, expenses_cents)
+                    _, isNew = self.goc_EUR_split(tx, fee_acc, expenses_cents)
+                    updated |= isNew
 
-                self.goc_stock_split(tx, assets_acc, stock_count, total_stock_cents)
+                _, isNew = self.goc_stock_split(tx, assets_acc, stock_count, total_stock_cents)
+                updated |= isNew
 
                 for split in tx.GetSplitList():
                     if "Imbalance" in split.GetAccount().get_full_name():
+                        updated = True
 #                        split.Destroy()
                         split.SetAccount(currency_acc)
                         value = GncNumeric(total_stock_cents, self.currency_EUR.get_fraction())
                         split.SetAmount(value)
                         split.SetValue(value)
 
-
                 tx.CommitEdit()
 
-                self.print_transaction(tx)
+                if updated:
+                    print()
+                    print(line)
+                    self.print_transaction(tx)
 
 
 
