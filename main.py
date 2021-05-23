@@ -419,6 +419,14 @@ class CashScript:
                     print("WARNING: ignoring " + str(line.rstrip("\n")))
                     continue
 
+                if "Lagerstellenwechsel" in transaction_info:
+                    print("WARNING: ignoring " + str(line.rstrip("\n")))
+                    continue
+
+                if "WP-Ausbuchung" in transaction_info:
+                    print("WARNING: ignoring " + str(line.rstrip("\n")))
+                    continue
+
                 # parse date
                 datetime_date = datetime.fromisoformat(date)
 
@@ -459,15 +467,9 @@ class CashScript:
 
                 _, isNew = self.goc_stock_split(tx, assets_acc, stock_count, total_stock_cents)
                 updated |= isNew
-
-                for split in tx.GetSplitList():
-                    if "Imbalance" in split.GetAccount().get_full_name():
-                        updated = True
-#                        split.Destroy()
-                        split.SetAccount(currency_acc)
-                        value = GncNumeric(total_stock_cents, self.currency_EUR.get_fraction())
-                        split.SetAmount(value)
-                        split.SetValue(value)
+                value = GncNumeric(total_stock_cents, self.currency_EUR.get_fraction())
+                _, isNew = self.goc_split(tx, currency_acc, value, value)
+                updated |= isNew
 
                 tx.CommitEdit()
 
