@@ -326,61 +326,67 @@ class CashScript:
     def read_statement_transactions(self, tsv_file, giro_acc):
         with open(tsv_file) as f:
             for i, line in enumerate(f):
-                if line.startswith("#"):
-                    continue
-                row = line.rstrip("\n").split("\t")
-
-                date = row[0]
-                description = row[4]
-                num = row[5]
-                value = row[7]
-                cents = int(value.replace(",",""))
-
                 try:
-                    datetime_date = datetime.fromisoformat(date)
+                    self.read_statement_transactions_line(giro_acc, line)
                 except Exception as e:
-                    print("Ignoring record because of erroneous date: " + str(date))
-                    continue
+                    raise RuntimeError("Problem in line " + str(i+1) + " of " + str(tsv_file) + ": " + line) from e
 
-                props = {"num": num, "value": GncNumeric(cents, self.currency_EUR.get_fraction())}
-                check_desc = not ("--heuristic" in self.args and self.args["--heuristic"])
-                tx = self.find_transaction(giro_acc, datetime_date, description, props, check_desc=check_desc)
+    def read_statement_transactions_line(self, giro_acc, line):
+        if line.startswith("#"):
+            return
+        row = line.rstrip("\n").split("\t")
 
-                if type(tx) == list:
-                    print("ERROR: Multiple candidates, ignoring")
-                    continue
+        date = row[0]
+        description = row[4]
+        num = row[5]
+        value = row[7]
+        cents = int(value.replace(",",""))
 
-                created_timestamp = None
-                updated = False
-                if not tx:
-                    tx = Transaction(self.book)
-                    created_timestamp = datetime.now()
+        try:
+            datetime_date = datetime.fromisoformat(date)
+        except Exception as e:
+            print("Ignoring record because of erroneous date: " + str(date))
+            return
 
-                tx.BeginEdit()
-                if created_timestamp:
-                    tx.SetDateEnteredSecs(created_timestamp)
+        props = {"num": num, "value": GncNumeric(cents, self.currency_EUR.get_fraction())}
+        check_desc = not ("--heuristic" in self.args and self.args["--heuristic"])
+        tx = self.find_transaction(giro_acc, datetime_date, description, props, check_desc=check_desc)
 
-                tx.SetDate(datetime_date.day, datetime_date.month, datetime_date.year)
-                tx.SetDescription(description)
-                if not tx.GetCurrency() or tx.GetCurrency().get_unique_name() != self.currency_EUR.get_unique_name():
-                    updated = True
-                    tx.SetCurrency(self.currency_EUR)
-                if tx.GetNum() != num:
-                    updated = True
-                    tx.SetNum(num)
+        if type(tx) == list:
+            print("ERROR: Multiple candidates, ignoring")
+            return
 
-                split, isNew = self.goc_EUR_split(tx, giro_acc, cents)
-                if created_timestamp or updated or isNew:
-                    info = (" date: " + str(date)
-                        + " desc: " + str(description)
-                        + " num: " + str(num)
-                        + " value: " + str(value))
-                    if created_timestamp:
-                        print("  creating " + info)
-                    else:
-                        print("  updating " + info)
-                    self.print_split_row(split, prefix="       ")
-                tx.CommitEdit()
+        created_timestamp = None
+        updated = False
+        if not tx:
+            tx = Transaction(self.book)
+            created_timestamp = datetime.now()
+
+        tx.BeginEdit()
+        if created_timestamp:
+            tx.SetDateEnteredSecs(created_timestamp)
+
+        tx.SetDate(datetime_date.day, datetime_date.month, datetime_date.year)
+        tx.SetDescription(description)
+        if not tx.GetCurrency() or tx.GetCurrency().get_unique_name() != self.currency_EUR.get_unique_name():
+            updated = True
+            tx.SetCurrency(self.currency_EUR)
+        if tx.GetNum() != num:
+            updated = True
+            tx.SetNum(num)
+
+        split, isNew = self.goc_EUR_split(tx, giro_acc, cents)
+        if created_timestamp or updated or isNew:
+            info = (" date: " + str(date)
+                + " desc: " + str(description)
+                + " num: " + str(num)
+                + " value: " + str(value))
+            if created_timestamp:
+                print("  creating " + info)
+            else:
+                print("  updating " + info)
+            self.print_split_row(split, prefix="       ")
+        tx.CommitEdit()
 
 
     def read_portfolio_transactions(self, tsv_file, checking_root, invest_root):
