@@ -3,12 +3,13 @@
 Usage:
   main.py [options] portfolio <tsv_file> [(checking <checking_root>)] [(invest <invest_root>)]
   main.py [options] statement <tsv_file> [(checking <checking_root>)]
-  main.py [options]
+  main.py [options] ofx <ofx_file> [(checking <checking_root>)]
 
 Options:
   -h --help                     Show this screen.
   --version                     Show version.
   --gnucash <gnucash>           Gnucash file.
+  --heuristic                   Match statements based on their date and value only.
 
 """
 
@@ -28,6 +29,8 @@ import gnucash as gc
 from gnucash import Account, Session, Transaction, Split, GncNumeric, GncCommodity, GncPrice, ACCT_TYPE_STOCK
 from collections import defaultdict
 
+from ofxparse import ofxparse
+
 translation = {
     "Aktien": "Stock",
     "Fonds": "Fund",
@@ -35,8 +38,12 @@ translation = {
 
 class CashScript:
 
-    def __init__(self, session):
+    def __init__(self, session, args):
         self.session = session
+        self.args = args
+        if session == None:
+            return
+
         self.book = session.book
         self.root = self.book.get_root_account()
         self.commod_tab = self.book.get_table()
@@ -82,7 +89,7 @@ class CashScript:
             if found:
                 return found
 
-    def find_transaction(self, account, date, desc, props={}, idx=None):
+    def find_transaction(self, account, date, desc, props={}, idx=None, check_desc=True):
         """Searches for the transaction in account with the specified date and description.
         Additional properties might be given which restricts the search.
         However, those are not obligatory.
@@ -92,9 +99,11 @@ class CashScript:
         splits = account.GetSplitList()
         candidates = []
 
-        def check_split(split):
+        def check_split(split, check_desc=True):
             """Returns true if the split corresponds to the constraints"""
-            if date.date() != tx.GetDate().date() or desc != tx.GetDescription():
+            if date.date() != tx.GetDate().date():
+                return False
+            if check_desc and desc != tx.GetDescription():
                 return False
 
             for p_name, p_val in props.items():
@@ -114,18 +123,22 @@ class CashScript:
 
         for split in splits:
             tx = split.GetParent()
-            if check_split(split):
+            if check_split(split, check_desc=check_desc):
                 candidates.append(tx)
 
         if idx == None:
-            if len(candidates) != 1:
-                print("Could not find transaction " + str(desc) + " on " + str(date.date()) + " because there are " + str(len(candidates)) + " candidates")
-                return None
+            len_check = lambda candidates: len(candidates) == 1
             idx = 0
         else:
+            len_check = lambda candidates: len(candidates) != 0
+
+        if not len_check(candidates):
+            print("Could not find transaction " + str(desc)
+                    + " on " + str(date.date())
+                    + " because there are " + str(len(candidates)) + " candidates")
             if len(candidates) == 0:
-                print("Could not find transaction " + str(desc) + " on " + str(date.date()) + " because there are " + str(len(candidates)) + " candidates")
                 return None
+            return candidates
 
         if len(candidates) > 1:
             candidates.sort(key=lambda tx: int(tx.GetNum()))
@@ -296,6 +309,20 @@ class CashScript:
         price.set_value(GncNumeric(cents,100))
         self.price_db.add_price(price)
 
+    def read_ofx_transactions(self, ofx_file):
+        with open(ofx_file) as fileobj:
+            ofx = ofxparse.OfxParser.parse(fileobj)
+
+        acc = ofx.account
+        # TODO: find/create account
+        print(acc)
+        for d in dir(acc):
+            x = getattr(acc, d)
+            if " at 0x" in repr(x):
+                continue
+            print(str(d) + "  " + str(x))
+
+
     def read_statement_transactions(self, tsv_file, giro_acc):
         with open(tsv_file) as f:
             for i, line in enumerate(f):
@@ -306,13 +333,22 @@ class CashScript:
                 date = row[0]
                 description = row[4]
                 num = row[5]
-                value = row[9]
+                value = row[7]
                 cents = int(value.replace(",",""))
 
-                datetime_date = datetime.fromisoformat(date)
+                try:
+                    datetime_date = datetime.fromisoformat(date)
+                except Exception as e:
+                    print("Ignoring record because of erroneous date: " + str(date))
+                    continue
 
                 props = {"num": num, "value": GncNumeric(cents, self.currency_EUR.get_fraction())}
-                tx = self.find_transaction(giro_acc, datetime_date, description, props)
+                check_desc = not ("--heuristic" in self.args and self.args["--heuristic"])
+                tx = self.find_transaction(giro_acc, datetime_date, description, props, check_desc=check_desc)
+
+                if type(tx) == list:
+                    print("ERROR: Multiple candidates, ignoring")
+                    continue
 
                 created_timestamp = None
                 updated = False
@@ -392,7 +428,7 @@ class CashScript:
                 tx = self.find_transaction(giro_acc, datetime_date, transaction_info, idx=tx_to_id[key])
                 tx_to_id[key] += 1
 
-                if not tx:
+                if not tx or type(tx) == list:
                     print("ERROR: transaction not found for " + line)
                     print("transaction info: " + str(transaction_info))
                     continue
@@ -441,30 +477,40 @@ if __name__ == '__main__':
     args = docopt(__doc__)
     print(args)
 
+    session = None
     try:
-        session = Session(args["--gnucash"])
-        cs = CashScript(session)
-        book = session.book
-        root = book.get_root_account()
+        if args["--gnucash"]:
+            session = Session(args["--gnucash"])
+            book = session.book
+            root = book.get_root_account()
+        cs = CashScript(session, args)
+
+        def find_acc(args, key, default):
+            acc_path = args[key] or default
+            return cs.find_account(acc_path, root)
+
+        def find_checking(args):
+            return find_acc(args, "<checking_root>", "Assets.Current Assets.Checking Account")
 
         if args["portfolio"]:
-            checking_root_path = args["<checking_root>"] or "Assets.Current Assets.Checking Account"
-            invest_root_path = args["<invest_root>"] or "Assets.Investments"
-            checking_root = cs.find_account(checking_root_path, root)
-            invest_root = cs.find_account(invest_root_path, root)
+            checking_root = find_checking(args)
+            invest_root = find_acc(args, "<invest_root>", "Assets.Investments")
             cs.read_portfolio_transactions(args["<tsv_file>"], checking_root, invest_root)
 
         if args["statement"]:
-            checking_root_path = args["<checking_root>"] or "Assets.Current Assets.Checking Account"
-            checking_root = cs.find_account(checking_root_path, root)
+            checking_root = find_checking(args)
             cs.read_statement_transactions(args["<tsv_file>"], checking_root)
+
+        if args["ofx"]:
+            checking_root = find_checking(args)
+            cs.read_ofx_transactions(args["<ofx_file>"])
 
 
         # print(dir(root))
         # cs.print_accounts(root)
 
-        session.save()
+        if session: session.save()
     finally:
-        session.end()
+        if session: session.end()
 
 

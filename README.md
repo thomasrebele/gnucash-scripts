@@ -34,3 +34,13 @@ make install
 
 ```
 
+# Install ofxparse:
+
+```
+git clone https://github.com/jseutter/ofxparse.git
+```
+
+
+
+
+
