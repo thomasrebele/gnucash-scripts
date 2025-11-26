@@ -242,13 +242,16 @@ class CashScript:
             return acc
 
         # find type
-        url = "https://onvista.de/" + isin
-        r = requests.get(url)
-        parts = r.url.split("/")[3:]
+        # url = "https://onvista.de/" + isin
+        # r = requests.get(url)
+        # parts = r.url.split("/")[3:]
 
-        namespace = parts[0].title()
-        namespace = translation.get(namespace, namespace)
-        fullname = "-".join(parts[1].split("-")[:-2])
+        # namespace = parts[0].title()
+        # namespace = translation.get(namespace, namespace)
+        # fullname = "-".join(parts[1].split("-")[:-2])
+
+        fullname = input("Please provide a name for " + str(isin) + " (e.g., by searching on finanzen.net): ").strip()
+        namespace = input("Please provide the kind (Etf, Fund, Stock, etc): ").strip()
 
         # create account
         stock_type = namespace
@@ -327,11 +330,11 @@ class CashScript:
         with open(tsv_file) as f:
             for i, line in enumerate(f):
                 try:
-                    self.read_statement_transactions_line(giro_acc, line)
+                    self.read_statement_transaction_line(giro_acc, line)
                 except Exception as e:
                     raise RuntimeError("Problem in line " + str(i+1) + " of " + str(tsv_file) + ": " + line) from e
 
-    def read_statement_transactions_line(self, giro_acc, line):
+    def read_statement_transaction_line(self, giro_acc, line):
         if line.startswith("#"):
             return
         row = line.rstrip("\n").split("\t")
@@ -397,86 +400,92 @@ class CashScript:
             for i, line in enumerate(f):
                 if line.startswith("#"):
                     continue
+                try:
+                    self.read_portfolio_transaction_line(tsv_file, checking_root, invest_root, line, tx_to_id)
+                except Exception as e:
+                    raise RuntimeError("Problem in line " + str(i+1) + " of " + str(tsv_file) + ": " + line) from e
 
-                row = line.rstrip("\n").split("\t")
 
-                acc_number = row[0]
-                date = row[1]
-                valuta = row[2]
-                isin = row[3]
-                description = row[4]
-                nominal = row[5]
-                transaction_info = row[7]
-                price = row[9]
-                depot = row[10]
+    def read_portfolio_transaction_line(self, tsv_file, checking_root, invest_root, line, tx_to_id):
+        row = line.rstrip("\n").split("\t")
 
-                stock_count = Decimal(nominal.replace(",","."))
-                stock_price = Decimal(price.replace(",","."))
-                stock_cents = int(stock_price * 100)
-                total_stock_cents = int(stock_count * stock_price * 100)
+        acc_number = row[0]
+        date = row[1]
+        valuta = row[2]
+        isin = row[3]
+        description = row[4]
+        nominal = row[5]
+        transaction_info = row[7]
+        price = row[9]
+        depot = row[10]
 
-                if total_stock_cents == 0 or "Dividendenzahlung" in transaction_info:
-                    print("WARNING: ignoring " + str(line.rstrip("\n")))
-                    continue
+        stock_count = Decimal(nominal.replace(",","."))
+        stock_price = Decimal(price.replace(",","."))
+        stock_cents = int(stock_price * 100)
+        total_stock_cents = int(stock_count * stock_price * 100)
 
-                if "Lagerstellenwechsel" in transaction_info:
-                    print("WARNING: ignoring " + str(line.rstrip("\n")))
-                    continue
+        if total_stock_cents == 0 or "Dividendenzahlung" in transaction_info:
+            print("WARNING: ignoring " + str(line.rstrip("\n")))
+            return
 
-                if "WP-Ausbuchung" in transaction_info:
-                    print("WARNING: ignoring " + str(line.rstrip("\n")))
-                    continue
+        if "Lagerstellenwechsel" in transaction_info:
+            print("WARNING: ignoring " + str(line.rstrip("\n")))
+            return
 
-                # parse date
-                datetime_date = datetime.fromisoformat(date)
+        if "WP-Ausbuchung" in transaction_info:
+            print("WARNING: ignoring " + str(line.rstrip("\n")))
+            return
 
-                # find accounts
-                giro_acc = self.find_account_by_number(checking_root, acc_number)
-                assets_acc = self.goc_stock_account(invest_root, isin, ACCT_TYPE_STOCK)
-                fee_acc = self.find_account("Expenses.Services.Broker", self.root)
-                currency_acc = self.find_account("Trading.CURRENCY.EUR", self.root)
-                stock_commodity = assets_acc.GetCommodity()
+        # parse date
+        datetime_date = datetime.fromisoformat(date)
 
-                # find transaction
-                key = (datetime_date.date(), transaction_info)
-                tx = self.find_transaction(giro_acc, datetime_date, transaction_info, idx=tx_to_id[key])
-                tx_to_id[key] += 1
+        # find accounts
+        giro_acc = self.find_account_by_number(checking_root, acc_number)
+        assets_acc = self.goc_stock_account(invest_root, isin, ACCT_TYPE_STOCK)
+        fee_acc = self.find_account("Expenses.Services.Broker", self.root)
+        currency_acc = self.find_account("Trading.CURRENCY.EUR", self.root)
+        stock_commodity = assets_acc.GetCommodity()
 
-                if not tx or type(tx) == list:
-                    print("ERROR: transaction not found for " + line)
-                    print("transaction info: " + str(transaction_info))
-                    continue
+        # find transaction
+        key = (datetime_date.date(), transaction_info)
+        tx = self.find_transaction(giro_acc, datetime_date, transaction_info, idx=tx_to_id[key])
+        tx_to_id[key] += 1
 
-                self.goc_stock_price(stock_commodity, stock_cents, datetime_date)
+        if not tx or type(tx) == list:
+            print("ERROR: transaction not found for " + line)
+            print("transaction info: " + str(transaction_info))
+            return
 
-                # find split with the spent money
-                sp_giro = self.find_split_by_account(tx, giro_acc)
+        self.goc_stock_price(stock_commodity, stock_cents, datetime_date)
 
-                if not sp_giro:
-                    raise "ERROR: split not found"
+        # find split with the spent money
+        sp_giro = self.find_split_by_account(tx, giro_acc)
 
-                updated = False
-                tx.BeginEdit()
+        if not sp_giro:
+            raise "ERROR: split not found"
 
-                # broker_expenses
-                total_cents = sp_giro.GetValue().num()
-                expenses_cents = abs(abs(total_cents) - abs(total_stock_cents))
-                if expenses_cents > 0:
-                    _, isNew = self.goc_EUR_split(tx, fee_acc, expenses_cents)
-                    updated |= isNew
+        updated = False
+        tx.BeginEdit()
 
-                _, isNew = self.goc_stock_split(tx, assets_acc, stock_count, total_stock_cents)
-                updated |= isNew
-                value = GncNumeric(total_stock_cents, self.currency_EUR.get_fraction())
-                _, isNew = self.goc_split(tx, currency_acc, value, value)
-                updated |= isNew
+        # broker_expenses
+        total_cents = sp_giro.GetValue().num()
+        expenses_cents = abs(abs(total_cents) - abs(total_stock_cents))
+        if expenses_cents > 0:
+            _, isNew = self.goc_EUR_split(tx, fee_acc, expenses_cents)
+            updated |= isNew
 
-                tx.CommitEdit()
+        _, isNew = self.goc_stock_split(tx, assets_acc, stock_count, total_stock_cents)
+        updated |= isNew
+        value = GncNumeric(total_stock_cents, self.currency_EUR.get_fraction())
+        _, isNew = self.goc_split(tx, currency_acc, value, value)
+        updated |= isNew
 
-                if updated:
-                    print()
-                    print("  imported " + line)
-                    self.print_transaction(tx)
+        tx.CommitEdit()
+
+        if updated:
+            print()
+            print("  imported " + line)
+            self.print_transaction(tx)
 
 
 
