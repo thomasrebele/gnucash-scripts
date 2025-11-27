@@ -305,12 +305,21 @@ class CashScript:
         return self.goc_split(transaction, account, value, amount)
 
     def goc_stock_price(self, commodity, cents, datetime_date):
+        # check whether entry already exists
+        for price in self.price_db.get_prices(commodity, self.currency_EUR):
+            check = price.get_time64() == datetime_date
+            check = check and price.get_value().num == cents
+            check = check and price.get_value().denom == 100
+            if check:
+                return price
+
         price = GncPrice(self.book)
         price.set_commodity(commodity)
         price.set_currency(self.currency_EUR)
         price.set_time64(datetime_date)
         price.set_value(GncNumeric(cents,100))
         self.price_db.add_price(price)
+        return price
 
     def read_ofx_transactions(self, ofx_file):
         with open(ofx_file) as fileobj:
