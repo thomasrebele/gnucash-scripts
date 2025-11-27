@@ -436,6 +436,11 @@ class CashScript:
             print("WARNING: ignoring " + str(line.rstrip("\n")))
             return
 
+        if "Spin Off in" in transaction_info:
+            print("WARNING: ignoring " + str(line.rstrip("\n")))
+            return
+
+
         # parse date
         datetime_date = datetime.fromisoformat(date)
 
