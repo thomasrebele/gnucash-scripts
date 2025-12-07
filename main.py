@@ -452,9 +452,14 @@ class CashScript:
 
         # parse date
         datetime_date = datetime.fromisoformat(date)
+        datetime_valuta = datetime.fromisoformat(valuta)
 
         # find accounts
         giro_acc = self.find_account_by_number(checking_root, acc_number)
+        if giro_acc == None:
+            print("ERROR: account " + str(acc_number) + " not found")
+            return
+
         assets_acc = self.goc_stock_account(invest_root, isin, ACCT_TYPE_STOCK)
         fee_acc = self.find_account("Expenses.Services.Broker", self.root)
         currency_acc = self.find_account("Trading.CURRENCY.EUR", self.root)
@@ -463,12 +468,16 @@ class CashScript:
         # find transaction
         key = (datetime_date.date(), transaction_info)
         tx = self.find_transaction(giro_acc, datetime_date, transaction_info, idx=tx_to_id[key])
-        tx_to_id[key] += 1
+
+        if not tx:
+            key = (datetime_valuta.date(), transaction_info)
+            tx = self.find_transaction(giro_acc, datetime_valuta, transaction_info, idx=tx_to_id[key])
 
         if not tx or type(tx) == list:
             print("ERROR: transaction not found for " + line)
             print("transaction info: " + str(transaction_info))
             return
+        tx_to_id[key] += 1
 
         self.goc_stock_price(stock_commodity, stock_cents, datetime_date)
 
