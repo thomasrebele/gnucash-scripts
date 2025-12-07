@@ -96,7 +96,8 @@ class CashScript:
             if found:
                 return found
 
-    def find_transaction(self, account, date, desc, props={}, idx=None, check_desc=CheckDescription.EXACT):
+    def find_transaction(self, account, date, desc, props={}, idx=None, check_desc=CheckDescription.EXACT,
+                         warn_not_matched=True):
         """Searches for the transaction in account with the specified date and description.
         Additional properties might be given which restricts the search.
         However, those are not obligatory.
@@ -149,9 +150,10 @@ class CashScript:
             len_check = lambda candidates: len(candidates) != 0
 
         if not len_check(candidates):
-            print("Could not find transaction " + str(desc)
-                    + " on " + str(date.date())
-                    + " because there are " + str(len(candidates)) + " candidates")
+            if warn_not_matched:
+                print("Could not find transaction " + str(desc)
+                        + " on " + str(date.date())
+                        + " because there are " + str(len(candidates)) + " candidates")
             if len(candidates) == 0:
                 return None
             return candidates
@@ -496,7 +498,7 @@ class CashScript:
         search_until = min(datetime_date, datetime_valuta)
         while search_date >= search_until:
             key = (datetime_date.date(), transaction_info)
-            tx = self.find_transaction(giro_acc, search_date, isin, idx=tx_to_id[key], check_desc=CheckDescription.SUBSTR)
+            tx = self.find_transaction(giro_acc, search_date, isin, idx=tx_to_id[key], check_desc=CheckDescription.SUBSTR, warn_not_matched=False)
 
             if tx:
                 break
