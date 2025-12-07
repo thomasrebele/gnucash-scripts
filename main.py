@@ -10,6 +10,7 @@ Options:
   --version                     Show version.
   --gnucash <gnucash>           Gnucash file.
   --heuristic                   Match statements based on their date and value only.
+  --stock-description <file>    TSV file: <ISIN> <Type: Etf, Fund, Stock, ...> <Description>
 
 """
 
@@ -20,9 +21,10 @@ Options:
 
 from docopt import docopt
 
+from enum import Enum
 import bs4
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import requests
 from decimal import Decimal
 import gnucash as gc
@@ -35,6 +37,11 @@ translation = {
     "Aktien": "Stock",
     "Fonds": "Fund",
     }
+
+class CheckDescription(Enum):
+    NO = 1
+    EXACT = 2
+    SUBSTR = 3
 
 class CashScript:
 
@@ -89,7 +96,7 @@ class CashScript:
             if found:
                 return found
 
-    def find_transaction(self, account, date, desc, props={}, idx=None, check_desc=True):
+    def find_transaction(self, account, date, desc, props={}, idx=None, check_desc=CheckDescription.EXACT):
         """Searches for the transaction in account with the specified date and description.
         Additional properties might be given which restricts the search.
         However, those are not obligatory.
@@ -99,11 +106,20 @@ class CashScript:
         splits = account.GetSplitList()
         candidates = []
 
-        def check_split(split, check_desc=True):
+        def check_description(split, exp_desc, act_desc, check_desc):
+            if check_desc == CheckDescription.NO:
+                return True
+            if check_desc == CheckDescription.EXACT:
+                return exp_desc == act_desc
+            if check_desc == CheckDescription.SUBSTR:
+                return exp_desc in act_desc
+            
+
+        def check_split(split, check_desc):
             """Returns true if the split corresponds to the constraints"""
             if date.date() != tx.GetDate().date():
                 return False
-            if check_desc and desc != tx.GetDescription():
+            if not check_description(split, desc, tx.GetDescription(), check_desc):
                 return False
 
             for p_name, p_val in props.items():
@@ -241,17 +257,25 @@ class CashScript:
         if acc:
             return acc
 
-        # find type
-        # url = "https://onvista.de/" + isin
-        # r = requests.get(url)
-        # parts = r.url.split("/")[3:]
+        fullname = None
+        namespace = None
 
-        # namespace = parts[0].title()
-        # namespace = translation.get(namespace, namespace)
-        # fullname = "-".join(parts[1].split("-")[:-2])
-
-        fullname = input("Please provide a name for " + str(isin) + " (e.g., by searching on finanzen.net): ").strip()
-        namespace = input("Please provide the kind (Etf, Fund, Stock, etc): ").strip()
+        # try to read from stock description TSV file
+        
+        stock_desc_file = self.args["--stock-description"]
+        if stock_desc_file:
+            with open(stock_desc_file) as f:
+                for line in f:
+                    parts = line.replace("\n","").split("\t")
+                    if parts[0] == isin:
+                        namespace = parts[1]
+                        fullname = parts[2]
+                        break
+        
+        if fullname == None:
+            fullname = input("Please provide a name for " + str(isin) + " (e.g., by searching on finanzen.net): ").strip()
+        if namespace == None:
+            namespace = input("Please provide the kind (Etf, Fund, Stock, etc): ").strip()
 
         # create account
         stock_type = namespace
@@ -467,11 +491,16 @@ class CashScript:
 
         # find transaction
         key = (datetime_date.date(), transaction_info)
-        tx = self.find_transaction(giro_acc, datetime_date, transaction_info, idx=tx_to_id[key])
+        tx = self.find_transaction(giro_acc, datetime_date, isin, idx=tx_to_id[key], check_desc=CheckDescription.SUBSTR)
 
         if not tx:
             key = (datetime_valuta.date(), transaction_info)
-            tx = self.find_transaction(giro_acc, datetime_valuta, transaction_info, idx=tx_to_id[key])
+            tx = self.find_transaction(giro_acc, datetime_valuta, isin, idx=tx_to_id[key], check_desc=CheckDescription.SUBSTR)
+        # try an earlier day
+        if not tx:
+            search_date = datetime_valuta - timedelta(days=1)
+            key = (search_date.date(), transaction_info)
+            tx = self.find_transaction(giro_acc, search_date, isin, idx=tx_to_id[key], check_desc=CheckDescription.SUBSTR)
 
         if not tx or type(tx) == list:
             print("ERROR: transaction not found for " + line)
@@ -515,7 +544,7 @@ class CashScript:
 
 if __name__ == '__main__':
     args = docopt(__doc__)
-    print(args)
+    print("Args: " + str(args))
 
     session = None
     try:
