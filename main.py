@@ -250,7 +250,7 @@ class CashScript:
             namespace = "UNKNOWN"
 
         # 'book', 'fullname', 'commodity_namespace', 'mnemonic', 'cusip', and 'fraction'
-        new_commod = GncCommodity(self.book, name, namespace, isin, isin, 1000)
+        new_commod = GncCommodity(self.book, name, namespace, isin, isin, 10000)
         return self.commod_tab.insert(new_commod)
 
 
@@ -320,7 +320,7 @@ class CashScript:
         return split, True
 
     def goc_stock_split(self, transaction, account, stock_count, total_value_cents):
-        amount = GncNumeric(int(stock_count*1000), 1000)
+        amount = GncNumeric(int(stock_count*10000), 10000)
         value = GncNumeric(total_value_cents, 100)
         return self.goc_split(transaction, account, value, amount)
 
