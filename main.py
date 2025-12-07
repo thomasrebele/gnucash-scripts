@@ -443,8 +443,8 @@ class CashScript:
         row = line.rstrip("\n").split("\t")
 
         acc_number = row[0]
-        date = row[1]
-        valuta = row[2]
+        entry_date = row[1]
+        valuta_date = row[2]
         isin = row[3]
         description = row[4]
         nominal = row[5]
@@ -475,8 +475,8 @@ class CashScript:
 
 
         # parse date
-        datetime_date = datetime.fromisoformat(date)
-        datetime_valuta = datetime.fromisoformat(valuta)
+        datetime_date = datetime.fromisoformat(entry_date)
+        datetime_valuta = datetime.fromisoformat(valuta_date)
 
         # find accounts
         giro_acc = self.find_account_by_number(checking_root, acc_number)
@@ -490,17 +490,17 @@ class CashScript:
         stock_commodity = assets_acc.GetCommodity()
 
         # find transaction
-        key = (datetime_date.date(), transaction_info)
-        tx = self.find_transaction(giro_acc, datetime_date, isin, idx=tx_to_id[key], check_desc=CheckDescription.SUBSTR)
-
-        if not tx:
-            key = (datetime_valuta.date(), transaction_info)
-            tx = self.find_transaction(giro_acc, datetime_valuta, isin, idx=tx_to_id[key], check_desc=CheckDescription.SUBSTR)
-        # try an earlier day
-        if not tx:
-            search_date = datetime_valuta - timedelta(days=1)
-            key = (search_date.date(), transaction_info)
+        # unfortunately the dates may not be precise enough ...
+        # start with the higher date and then search backwards
+        search_date = max(datetime_date, datetime_valuta)
+        search_until = min(datetime_date, datetime_valuta)
+        while search_date >= search_until:
+            key = (datetime_date.date(), transaction_info)
             tx = self.find_transaction(giro_acc, search_date, isin, idx=tx_to_id[key], check_desc=CheckDescription.SUBSTR)
+
+            if tx:
+                break
+            search_date -= timedelta(days=1)
 
         if not tx or type(tx) == list:
             print("ERROR: transaction not found for " + line)
