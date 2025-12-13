@@ -388,7 +388,10 @@ class CashScript:
             return
 
         props = {"num": num, "value": GncNumeric(cents, self.currency_EUR.get_fraction())}
-        check_desc = not ("--heuristic" in self.args and self.args["--heuristic"])
+        if "--heuristic" in self.args and self.args["--heuristic"]:
+            check_desc = CheckDescription.NO
+        else:
+            check_desc = CheckDescription.EXACT
         tx = self.find_transaction(giro_acc, datetime_date, description, props, check_desc=check_desc)
 
         if type(tx) == list:
