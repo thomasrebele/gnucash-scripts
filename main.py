@@ -2,6 +2,7 @@
 
 Usage:
   main.py [options] portfolio <tsv_file> [(checking <checking_root>)] [(invest <invest_root>)]
+  main.py [options] create-portfolio-account [(invest <invest_root>)] <isins>
   main.py [options] statement <tsv_file> [(checking <checking_root>)]
   main.py [options] ofx <ofx_file> [(checking <checking_root>)]
 
@@ -567,6 +568,12 @@ if __name__ == '__main__':
             checking_root = find_checking(args)
             invest_root = find_acc(args, "<invest_root>", "Assets.Investments")
             cs.read_portfolio_transactions(args["<tsv_file>"], checking_root, invest_root)
+
+        if args["create-portfolio-account"]:
+            invest_root = find_acc(args, "<invest_root>", "Assets.Investments")
+            isins = args["<isins>"]
+            for isin in isins.split(","):
+                assets_acc = cs.goc_stock_account(invest_root, isin, ACCT_TYPE_STOCK)
 
         if args["statement"]:
             checking_root = find_checking(args)
