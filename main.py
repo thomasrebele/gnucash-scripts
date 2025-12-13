@@ -292,7 +292,7 @@ class CashScript:
 
         commodity = self.goc_stock_commodity(isin, name=fullname, namespace=namespace)
         stock_acc = Account(self.book)
-        stock_acc.SetName(fullname)
+        stock_acc.SetName(isin + " " + fullname)
         stock_acc.SetCommodity(commodity)
         stock_acc.SetType(account_type)
         category.append_child(stock_acc)
