@@ -301,24 +301,31 @@ class CashScript:
         return stock_acc
 
     def goc_split(self, transaction, account, value, amount):
-        """Search or create a split. Returns split, isNew."""
+        """Search or create a split. Returns split, isChanged."""
+        changed = False
+        split = None
         # search for existing split
-        for split in transaction.GetSplitList():
-            check = split.GetAccount().get_full_name() == account.get_full_name()
-            check = check and split.GetAmount().num() * amount.denom() == amount.num() * split.GetAmount().denom()
-            check = check and split.GetValue().num() * value.denom() == value.num() * split.GetValue().denom()
+        for sp in transaction.GetSplitList():
+            if sp.GetAccount().get_full_name() == account.get_full_name():
+                split = sp
+                break
 
-            if check:
-                return split, False
-
-        # create new split
-        split = Split(self.book)
-        split.SetParent(transaction)
-        split.SetAccount(account)
-        split.SetMemo("automatic")
-        split.SetValue(value)
-        split.SetAmount(amount)
-        return split, True
+        if split == None:
+            # create new split
+            split = Split(self.book)
+            split.SetParent(transaction)
+            split.SetAccount(account)
+            split.SetMemo("automatic")
+            changed = True
+        
+        check = True
+        check = check and split.GetAmount().num() * amount.denom() == amount.num() * split.GetAmount().denom()
+        check = check and split.GetValue().num() * value.denom() == value.num() * split.GetValue().denom()
+        if not check:
+            split.SetValue(value)
+            split.SetAmount(amount)
+            changed = True
+        return split, changed
 
     def goc_stock_split(self, transaction, account, stock_count, total_value_cents):
         amount = GncNumeric(int(stock_count*1000000), 1000000)
@@ -417,8 +424,8 @@ class CashScript:
             updated = True
             tx.SetNum(num)
 
-        split, isNew = self.goc_EUR_split(tx, giro_acc, cents)
-        if created_timestamp or updated or isNew:
+        split, isChanged = self.goc_EUR_split(tx, giro_acc, cents)
+        if created_timestamp or updated or isChanged:
             info = (" date: " + str(date)
                 + " desc: " + str(description)
                 + " num: " + str(num)
@@ -529,14 +536,14 @@ class CashScript:
         total_cents = sp_giro.GetValue().num()
         expenses_cents = abs(abs(total_cents) - abs(total_stock_cents))
         if expenses_cents > 0:
-            _, isNew = self.goc_EUR_split(tx, fee_acc, expenses_cents)
-            updated |= isNew
+            _, isChanged = self.goc_EUR_split(tx, fee_acc, expenses_cents)
+            updated |= isChanged
 
-        _, isNew = self.goc_stock_split(tx, assets_acc, stock_count, total_stock_cents)
-        updated |= isNew
+        _, isChanged = self.goc_stock_split(tx, assets_acc, stock_count, total_stock_cents)
+        updated |= isChanged
         value = GncNumeric(total_stock_cents, self.currency_EUR.get_fraction())
-        _, isNew = self.goc_split(tx, currency_acc, value, value)
-        updated |= isNew
+        _, isChanged = self.goc_split(tx, currency_acc, value, value)
+        updated |= isChanged
 
         tx.CommitEdit()
 
