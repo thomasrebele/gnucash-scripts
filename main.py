@@ -22,7 +22,6 @@ Options:
 
 from docopt import docopt
 
-from enum import Enum
 import bs4
 import time
 from datetime import datetime, timedelta
@@ -39,10 +38,15 @@ translation = {
     "Fonds": "Fund",
     }
 
-class CheckDescription(Enum):
-    NO = 1
-    EXACT = 2
-    SUBSTR = 3
+class CheckDescription:
+    def ignore(exp_desc, act_desc):
+        return True
+
+    def exact(exp_desc, act_desc):
+        return exp_desc == act_desc
+
+    def substr(exp_desc, act_desc):
+        return exp_desc in act_desc
 
 class CashScript:
 
@@ -97,7 +101,7 @@ class CashScript:
             if found:
                 return found
 
-    def find_transaction(self, account, date, desc, props={}, idx=None, check_desc=CheckDescription.EXACT,
+    def find_transaction(self, account, date, desc, props={}, idx=None, check_desc=CheckDescription.exact,
                          warn_not_matched=True):
         """Searches for the transaction in account with the specified date and description.
         Additional properties might be given which restricts the search.
@@ -108,20 +112,11 @@ class CashScript:
         splits = account.GetSplitList()
         candidates = []
 
-        def check_description(split, exp_desc, act_desc, check_desc):
-            if check_desc == CheckDescription.NO:
-                return True
-            if check_desc == CheckDescription.EXACT:
-                return exp_desc == act_desc
-            if check_desc == CheckDescription.SUBSTR:
-                return exp_desc in act_desc
-            
-
         def check_split(split, check_desc):
             """Returns true if the split corresponds to the constraints"""
             if date.date() != tx.GetDate().date():
                 return False
-            if not check_description(split, desc, tx.GetDescription(), check_desc):
+            if not check_desc(desc, tx.GetDescription()):
                 return False
 
             for p_name, p_val in props.items():
@@ -396,9 +391,9 @@ class CashScript:
 
         props = {"num": num, "value": GncNumeric(cents, self.currency_EUR.get_fraction())}
         if "--heuristic" in self.args and self.args["--heuristic"]:
-            check_desc = CheckDescription.NO
+            check_desc = CheckDescription.ignore
         else:
-            check_desc = CheckDescription.EXACT
+            check_desc = CheckDescription.exact
         tx = self.find_transaction(giro_acc, datetime_date, description, props, check_desc=check_desc)
 
         if type(tx) == list:
@@ -470,7 +465,7 @@ class CashScript:
         stock_cents = int(stock_price * 100)
         total_stock_cents = int(stock_count * stock_price * 100)
 
-        if total_stock_cents == 0 or "Dividendenzahlung" in transaction_info:
+        if total_stock_cents == 0 or "Dividendenzahlung" in transaction_info or "Erträgnisausschüttung" in transaction_info:
             print("WARNING: ignoring " + str(line.rstrip("\n")))
             return
 
@@ -507,9 +502,14 @@ class CashScript:
         # start with the higher date and then search backwards
         search_date = max(datetime_date, datetime_valuta)
         search_until = min(datetime_date, datetime_valuta)
+        def check_desc(exp_desc, act_desc):
+            if "Erträgnisausschüttung" in act_desc or "Dividendenzahlung" in act_desc:
+                return False
+            return CheckDescription.substr(exp_desc, act_desc)
+
         while search_date >= search_until:
             key = (datetime_date.date(), transaction_info)
-            tx = self.find_transaction(giro_acc, search_date, isin, idx=tx_to_id[key], check_desc=CheckDescription.SUBSTR, warn_not_matched=False)
+            tx = self.find_transaction(giro_acc, search_date, isin, idx=tx_to_id[key], check_desc=check_desc, warn_not_matched=False)
 
             if tx:
                 break
